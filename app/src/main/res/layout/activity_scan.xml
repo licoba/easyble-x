@@ -35,6 +35,15 @@
                 android:layout_height="wrap_content"/>
         </RadioGroup>
 
+        <Button
+            android:id="@+id/btnDebugConnect"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="end"
+            android:layout_margin="8dp"
+            android:text="调试连接"
+            android:padding="8dp"/>
+
         <ListView
             android:id="@+id/lv"
             android:layout_marginTop="10dp"

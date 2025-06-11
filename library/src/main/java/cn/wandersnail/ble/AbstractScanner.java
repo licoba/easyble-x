@@ -31,6 +31,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import cn.wandersnail.ble.callback.ScanListener;
+import cn.wandersnail.ble.util.BluetoothDeviceLogger;
 import cn.wandersnail.ble.util.Logger;
 import cn.wandersnail.commons.poster.PosterDispatcher;
 import cn.wandersnail.commons.poster.ThreadMode;
@@ -235,6 +236,8 @@ abstract class AbstractScanner implements Scanner {
             if (!noConnectPermission(context)) {
                 name = device.getName() == null ? "" : device.getName();//Android12需要连接权限才能获取设备名称
             }
+            String deviceType = device.getType() == BluetoothDevice.DEVICE_TYPE_LE ? "BLE" : 
+                              device.getType() == BluetoothDevice.DEVICE_TYPE_DUAL ? "DUAL" : "CLASSIC";
             if (configuration.rssiLowLimit <= rssi) {
                 //通过构建器实例化Device
                 Device dev = deviceCreator.create(device, result);
@@ -248,7 +251,12 @@ abstract class AbstractScanner implements Scanner {
                     handleScanCallback(false, dev, isConnectedBySys, -1, "");
                 }
             }
-            String msg = String.format(Locale.US, "found device! [name: %s, addr: %s]", TextUtils.isEmpty(name) ? "N/A" : name, device.getAddress());
+            String msg = String.format(Locale.getDefault(), "✅found device! [name: %s, addr: %s, type: %s]",
+                    TextUtils.isEmpty(name) ? "N/A" : name, device.getAddress(), deviceType);
+
+
+            BluetoothDeviceLogger.getInstance().logDeviceInfo(device);
+
             logger.log(Log.DEBUG, Logger.TYPE_SCAN_STATE, msg);
         });
     }

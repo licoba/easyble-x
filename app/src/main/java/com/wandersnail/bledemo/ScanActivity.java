@@ -44,6 +44,7 @@ public class ScanActivity extends BaseViewBindingActivity<ActivityScanBinding> {
     private final List<Device> devList = new ArrayList<>();
     private PermissionsRequester2 permissionsRequester;
     private boolean scanning;
+    private boolean shouldAutoScan = false; //是否自动搜索
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -59,6 +60,12 @@ public class ScanActivity extends BaseViewBindingActivity<ActivityScanBinding> {
         binding.lv.setOnItemClickListener((parent, view, position, id) -> {
             Intent intent = new Intent(ScanActivity.this, MainActivity.class);
             intent.putExtra("device", devList.get(position));
+            startActivity(intent);
+        });
+
+        binding.btnDebugConnect.setOnClickListener(v -> {
+            shouldAutoScan = false;
+            Intent intent = new Intent(ScanActivity.this, DebugConnectActivity.class);
             startActivity(intent);
         });
     }
@@ -129,7 +136,9 @@ public class ScanActivity extends BaseViewBindingActivity<ActivityScanBinding> {
         Log.d("Main", "onResume");
         if (EasyBLE.getInstance().isInitialized()) {
             if (EasyBLE.getInstance().isBluetoothOn()) {
-                doStartScan();
+                if (shouldAutoScan) {
+                    doStartScan();
+                }
             } else {
                 try {
                     startActivity(new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE));

@@ -30,6 +30,10 @@
                   android:configChanges="keyboardHidden|orientation|navigation|screenSize|keyboard"/>
         <activity android:name=".SendFileActivity" android:screenOrientation="portrait"
                   android:configChanges="keyboardHidden|orientation|navigation|screenSize|keyboard"/>
+        <activity android:name=".DebugConnectActivity" 
+                  android:theme="@style/AppTheme.NoActionBar"
+                  android:screenOrientation="portrait"
+                  android:configChanges="keyboardHidden|orientation|navigation|screenSize|keyboard"/>
     </application>
 
 </manifest>

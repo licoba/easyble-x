@@ -9,6 +9,11 @@
         <item name="actionOverflowMenuStyle">@style/MenuStyle</item>
     </style>    
     
+    <style name="AppTheme.NoActionBar">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+    </style>
+    
     <style name="MenuStyle" parent="@style/Widget.AppCompat.Light.PopupMenu.Overflow">
         <item name="overlapAnchor">false</item>
     </style>
