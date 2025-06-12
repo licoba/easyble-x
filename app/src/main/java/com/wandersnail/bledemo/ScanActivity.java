@@ -3,6 +3,7 @@ package com.wandersnail.bledemo;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
@@ -216,6 +217,7 @@ public class ScanActivity extends BaseViewBindingActivity<ActivityScanBinding> {
                 TextView tvName;
                 TextView tvAddr;
                 TextView tvRssi;
+                TextView tvDeviceType;
 
                 @Override
                 public void onBind(@NonNull Device device, int i) {
@@ -223,6 +225,22 @@ public class ScanActivity extends BaseViewBindingActivity<ActivityScanBinding> {
                     tvName.setText(device.getName().isEmpty() ? "N/A" : device.getName());
                     tvAddr.setText(device.getAddress());
                     tvRssi.setText("" + device.getRssi());
+                    
+                    // 设置设备类型
+                    String deviceType = "UNKNOWN";
+                    int type = device.getOriginDevice().getType();
+                    switch (type) {
+                        case BluetoothDevice.DEVICE_TYPE_CLASSIC:
+                            deviceType = "CLASSIC";
+                            break;
+                        case BluetoothDevice.DEVICE_TYPE_LE:
+                            deviceType = "LE";
+                            break;
+                        case BluetoothDevice.DEVICE_TYPE_DUAL:
+                            deviceType = "DUAL";
+                            break;
+                    }
+                    tvDeviceType.setText(deviceType);
                 }
 
                 @NotNull
@@ -232,6 +250,7 @@ public class ScanActivity extends BaseViewBindingActivity<ActivityScanBinding> {
                     tvName = view.findViewById(R.id.tvName);
                     tvAddr = view.findViewById(R.id.tvAddr);
                     tvRssi = view.findViewById(R.id.tvRssi);
+                    tvDeviceType = view.findViewById(R.id.tvDeviceType);
                     return view;
                 }
             };
