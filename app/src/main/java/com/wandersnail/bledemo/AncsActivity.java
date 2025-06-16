@@ -107,6 +107,11 @@ public class AncsActivity extends AppCompatActivity {
                     runOnUiThread(() -> {
                         tvStatus.appendLog("已连接到设备，正在发现服务...");
                     });
+                    // 请求更大的MTU值
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                        gatt.requestMtu(512);
+                        Log.d(TAG, "已请求MTU: 512");
+                    }
                     // 连接成功后开始发现服务
                     gatt.discoverServices();
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
@@ -226,6 +231,21 @@ public class AncsActivity extends AppCompatActivity {
                     Log.d(TAG, "收到通知详细内容，长度: " + data.length);
                     parseNotificationDetails(data);
                 }
+            }
+        }
+
+        @Override
+        public void onMtuChanged(BluetoothGatt gatt, int mtu, int status) {
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                Log.i(TAG, "MTU协商成功: " + mtu);
+                runOnUiThread(() -> {
+                    tvStatus.appendLog("MTU协商成功: " + mtu);
+                });
+            } else {
+                Log.e(TAG, "MTU协商失败: " + status);
+                runOnUiThread(() -> {
+                    tvStatus.appendLog("MTU协商失败: " + status);
+                });
             }
         }
     };
