@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical">
@@ -10,49 +9,62 @@
         android:layout_width="match_parent"
         android:layout_height="?attr/actionBarSize"
         android:background="?attr/colorPrimary"
-        android:theme="@style/ThemeOverlay.AppCompat.Dark.ActionBar"
-        app:popupTheme="@style/ThemeOverlay.AppCompat.Light" />
+        android:theme="@style/ThemeOverlay.AppCompat.Dark.ActionBar" />
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:padding="8dp">
+        android:padding="16dp">
 
         <EditText
             android:id="@+id/etMacAddress"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:hint="输入设备MAC地址"
-            android:inputType="text"
-            android:maxLines="1"
-            android:text="46:30:24:52:D8:1F" />
-
-        <Button
-            android:id="@+id/btnScan"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:text="扫描" />
+            android:hint="MAC地址" />
 
         <Button
             android:id="@+id/btnConnect"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
             android:text="连接" />
+
+        <Button
+            android:id="@+id/btnScan"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="扫描" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="16dp">
+
+        <Button
+            android:id="@+id/btnEnableNotifySource"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="启用通知源" />
+
+        <Button
+            android:id="@+id/btnEnableDataSource"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="启用数据源" />
     </LinearLayout>
 
     <com.wandersnail.bledemo.LogTextView
         android:id="@+id/tvStatus"
         android:layout_width="match_parent"
-        android:layout_height="220dp"
+        android:layout_height="0dp"
+        android:layout_weight="1"
         android:padding="16dp"
-        android:textSize="16sp"
-        android:background="#E8F5E9"
-        android:scrollbars="vertical"
-        android:fadeScrollbars="false" />
+        android:textSize="12sp" />
 
     <com.wandersnail.bledemo.LogTextView
         android:id="@+id/tvNotifications"
@@ -60,9 +72,6 @@
         android:layout_height="0dp"
         android:layout_weight="1"
         android:padding="16dp"
-        android:textSize="14sp"
-        android:background="#F5F5F5"
-        android:scrollbars="vertical"
-        android:fadeScrollbars="false" />
+        android:textSize="12sp" />
 
 </LinearLayout>

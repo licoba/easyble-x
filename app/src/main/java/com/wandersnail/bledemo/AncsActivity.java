@@ -39,6 +39,8 @@ import androidx.appcompat.widget.Toolbar;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
+import com.blankj.utilcode.util.ToastUtils;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -80,9 +82,13 @@ public class AncsActivity extends AppCompatActivity {
     private EditText etMacAddress;
     private Button btnConnect;
     private Button btnScan;
+    private Button btnEnableNotifySource;
+    private Button btnEnableDataSource;
     private Handler handler = new Handler(Looper.getMainLooper());
     private boolean isScanning = false;
     private BluetoothLeScanner bluetoothLeScanner;
+    private BluetoothGattCharacteristic notificationSourceChar;
+    private BluetoothGattCharacteristic dataSourceChar;
 
     private final BluetoothGattCallback gattCallback = new BluetoothGattCallback() {
         @SuppressLint("MissingPermission")
@@ -125,77 +131,36 @@ public class AncsActivity extends AppCompatActivity {
                         tvStatus.appendLog("发现ANCS服务");
                     });
 
-                    // 配置通知源特征，启用通知功能
-                    BluetoothGattCharacteristic notificationSource = ancsService.getCharacteristic(NOTIFICATION_SOURCE_UUID);
-                    if (notificationSource != null) {
-                        Log.d(TAG, "找到通知源特征，开始配置通知");
-                        // 启用通知
-                        boolean success = gatt.setCharacteristicNotification(notificationSource, true);
-                        if (!success) {
-                            Log.e(TAG, "启用通知失败");
-                            runOnUiThread(() -> {
-                                tvStatus.appendLog("启用通知失败");
-                            });
-                            return;
-                        }
-
-                        BluetoothGattDescriptor descriptor = notificationSource.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG);
-                        if (descriptor != null) {
-                            descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
-                            boolean writeSuccess = gatt.writeDescriptor(descriptor);
-                            if (!writeSuccess) {
-                                Log.e(TAG, "写入通知描述符失败");
-                                runOnUiThread(() -> {
-                                    tvStatus.appendLog("写入通知描述符失败");
-                                });
-                                return;
-                            }
-                            Log.i(TAG, "通知配置完成");
-                            runOnUiThread(() -> {
-                                tvStatus.appendLog("通知配置完成");
-                            });
-                        } else {
-                            Log.e(TAG, "未找到通知描述符");
-                            runOnUiThread(() -> {
-                                tvStatus.appendLog("未找到通知描述符");
-                            });
-                        }
+                    // 获取通知源特征
+                    notificationSourceChar = ancsService.getCharacteristic(NOTIFICATION_SOURCE_UUID);
+                    if (notificationSourceChar != null) {
+                        Log.d(TAG, "找到通知源特征");
+                        runOnUiThread(() -> {
+                            tvStatus.appendLog("找到通知源特征");
+                            btnEnableNotifySource.setEnabled(true);
+                        });
                     } else {
                         Log.e(TAG, "未找到通知源特征");
                         runOnUiThread(() -> {
                             tvStatus.appendLog("未找到通知源特征");
+                            btnEnableNotifySource.setEnabled(false);
                         });
                     }
 
-                    // 配置数据源特征，启用通知功能
-                    BluetoothGattCharacteristic dataSource = ancsService.getCharacteristic(DATA_SOURCE_UUID);
-                    if (dataSource != null) {
-                        Log.d(TAG, "找到数据源特征，开始配置通知");
-                        boolean success = gatt.setCharacteristicNotification(dataSource, true);
-                        if (!success) {
-                            Log.e(TAG, "启用数据源通知失败");
-                            runOnUiThread(() -> {
-                                tvStatus.appendLog("启用数据源通知失败");
-                            });
-                            return;
-                        }
-
-                        BluetoothGattDescriptor descriptor = dataSource.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG);
-                        if (descriptor != null) {
-                            descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
-                            boolean writeSuccess = gatt.writeDescriptor(descriptor);
-                            if (!writeSuccess) {
-                                Log.e(TAG, "写入数据源通知描述符失败");
-                                runOnUiThread(() -> {
-                                    tvStatus.appendLog("写入数据源通知描述符失败");
-                                });
-                                return;
-                            }
-                            Log.i(TAG, "数据源通知配置完成");
-                            runOnUiThread(() -> {
-                                tvStatus.appendLog("数据源通知配置完成");
-                            });
-                        }
+                    // 获取数据源特征
+                    dataSourceChar = ancsService.getCharacteristic(DATA_SOURCE_UUID);
+                    if (dataSourceChar != null) {
+                        Log.d(TAG, "找到数据源特征");
+                        runOnUiThread(() -> {
+                            tvStatus.appendLog("找到数据源特征");
+                            btnEnableDataSource.setEnabled(true);
+                        });
+                    } else {
+                        Log.e(TAG, "未找到数据源特征");
+                        runOnUiThread(() -> {
+                            tvStatus.appendLog("未找到数据源特征");
+                            btnEnableDataSource.setEnabled(false);
+                        });
                     }
                 } else {
                     Log.e(TAG, "未找到ANCS服务");
@@ -280,7 +245,7 @@ public class AncsActivity extends AppCompatActivity {
 //            }
 
             // 检查设备是否支持ANCS服务
-            if (isAncsDevice(result.getScanRecord())) {
+            if (isAncsDevice(result.getScanRecord()) && deviceName!=null && deviceName.contains("iPhone")) {
                 Log.i(TAG, "找到支持ANCS的设备: " + deviceName + " (" + device.getAddress() + ")");
                 stopScan();
                 connectToDevice(device);
@@ -339,6 +304,8 @@ public class AncsActivity extends AppCompatActivity {
         etMacAddress = findViewById(R.id.etMacAddress);
         btnConnect = findViewById(R.id.btnConnect);
         btnScan = findViewById(R.id.btnScan);
+        btnEnableNotifySource = findViewById(R.id.btnEnableNotifySource);
+        btnEnableDataSource = findViewById(R.id.btnEnableDataSource);
 
         btnScan.setOnClickListener(v -> {
             if (isScanning) {
@@ -347,6 +314,22 @@ public class AncsActivity extends AppCompatActivity {
             } else {
                 startScan();
                 btnScan.setText("停止");
+            }
+        });
+
+        btnEnableNotifySource.setOnClickListener(v -> {
+            if (bluetoothGatt != null && notificationSourceChar != null) {
+                enableNotificationSource();
+            } else {
+                Toast.makeText(this, "请先连接设备", Toast.LENGTH_SHORT).show();
+            }
+        });
+
+        btnEnableDataSource.setOnClickListener(v -> {
+            if (bluetoothGatt != null && dataSourceChar != null) {
+                enableDataSource();
+            } else {
+                Toast.makeText(this, "请先连接设备", Toast.LENGTH_SHORT).show();
             }
         });
 
@@ -472,6 +455,74 @@ public class AncsActivity extends AppCompatActivity {
         }
         
         bluetoothGatt = device.connectGatt(this, false, gattCallback);
+    }
+
+
+    @SuppressLint("MissingPermission")
+    private void enableDataSource() {
+        if (dataSourceChar != null) {
+            // 启用通知
+            boolean success = bluetoothGatt.setCharacteristicNotification(dataSourceChar, true);
+            if (!success) {
+                Log.e(TAG, "启用数据源通知失败");
+                runOnUiThread(() -> {
+                    tvStatus.appendLog("启用数据源通知失败");
+                });
+                return;
+            }
+
+            BluetoothGattDescriptor descriptor = dataSourceChar.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG);
+            if (descriptor != null) {
+                descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+                boolean writeSuccess = bluetoothGatt.writeDescriptor(descriptor);
+                if (!writeSuccess) {
+                    Log.e(TAG, "写入数据源描述符失败");
+                    runOnUiThread(() -> {
+                        tvStatus.appendLog("写入数据源描述符失败");
+                    });
+                    return;
+                }
+                Log.i(TAG, "数据源配置完成");
+                runOnUiThread(() -> {
+                    tvStatus.appendLog("数据源配置完成");
+                    btnEnableDataSource.setEnabled(false);
+                });
+            }
+        }
+    }
+
+
+    @SuppressLint("MissingPermission")
+    private void enableNotificationSource() {
+        if (notificationSourceChar != null) {
+            // 启用通知
+            boolean success = bluetoothGatt.setCharacteristicNotification(notificationSourceChar, true);
+            if (!success) {
+                Log.e(TAG, "启用通知源通知失败");
+                runOnUiThread(() -> {
+                    tvStatus.appendLog("启用通知源通知失败");
+                });
+                return;
+            }
+
+            BluetoothGattDescriptor descriptor = notificationSourceChar.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG);
+            if (descriptor != null) {
+                descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+                boolean writeSuccess = bluetoothGatt.writeDescriptor(descriptor);
+                if (!writeSuccess) {
+                    Log.e(TAG, "写入通知源描述符失败");
+                    runOnUiThread(() -> {
+                        tvStatus.appendLog("写入通知源描述符失败");
+                    });
+                    return;
+                }
+                Log.i(TAG, "通知源配置完成");
+                runOnUiThread(() -> {
+                    tvStatus.appendLog("通知源配置完成");
+                    btnEnableNotifySource.setEnabled(false);
+                });
+            }
+        }
     }
 
     private void parseAncsNotification(byte[] data) {
@@ -661,45 +712,129 @@ public class AncsActivity extends AppCompatActivity {
             BluetoothGattCharacteristic controlPoint = ancsService.getCharacteristic(CONTROL_POINT_UUID);
             if (controlPoint != null) {
                 // 构建获取通知属性的命令
-                byte[] command = new byte[8];
-                command[0] = COMMAND_GET_NOTIFICATION_ATTRIBUTES;
+                byte[] command = new byte[17];
+                command[0] = COMMAND_GET_NOTIFICATION_ATTRIBUTES;  // CommandID for GetNotificationAttributes
+                // UID (4 bytes)
                 command[1] = (byte) (notificationUid & 0xFF);
                 command[2] = (byte) ((notificationUid >> 8) & 0xFF);
                 command[3] = (byte) ((notificationUid >> 16) & 0xFF);
                 command[4] = (byte) ((notificationUid >> 24) & 0xFF);
-                command[5] = NOTIFICATION_ATTRIBUTE_TITLE;
-                command[6] = NOTIFICATION_ATTRIBUTE_MESSAGE;
-                command[7] = NOTIFICATION_ATTRIBUTE_APP_IDENTIFIER;
+                // AppIdentifier
+                command[5] = NOTIFICATION_ATTRIBUTE_APP_IDENTIFIER;
+                command[6] = (byte) 0xFF;
+                command[7] = (byte) 0xFF;
+                // Title
+                command[8] = NOTIFICATION_ATTRIBUTE_TITLE;
+                command[9] = (byte) 0xFF;
+                command[10] = (byte) 0xFF;
+                // Message
+                command[11] = NOTIFICATION_ATTRIBUTE_MESSAGE;
+                command[12] = (byte) 0xFF;
+                command[13] = (byte) 0xFF;
+                // Date
+                command[14] = NOTIFICATION_ATTRIBUTE_DATE;
+                command[15] = (byte) 0xFF;
+                command[16] = (byte) 0xFF;
 
                 controlPoint.setValue(command);
-                bluetoothGatt.writeCharacteristic(controlPoint);
-                Log.d(TAG, "已发送获取通知详细内容的请求");
+                boolean success = bluetoothGatt.writeCharacteristic(controlPoint);
+                Log.d(TAG, "发送获取通知详细内容的请求: " + success + ", command:" +bytesToHex(command));
+                if (!success) {
+                    Log.e(TAG, "写入特征值失败");
+                    runOnUiThread(() -> {
+                        tvStatus.appendLog("写入特征值失败");
+                    });
+                }
             }
         }
     }
 
     // 解析通知详细内容
+
     private void parseNotificationDetails(byte[] data) {
-        if (data.length < 4) {
-            Log.e(TAG, "通知详细内容数据长度不足");
+        if (data == null || data.length < 5) { // Minimum length: 1 byte Command ID + 4 bytes Notification UID
+            Log.e(TAG, "通知详细内容数据长度不足或为null");
             return;
         }
 
-        int attributeId = data[0] & 0xFF;
-        int length = (data[1] & 0xFF) | ((data[2] & 0xFF) << 8);
-        
-        if (data.length < 3 + length) {
-            Log.e(TAG, "通知详细内容数据不完整");
-            return;
+        int offset = 0;
+
+        // 1. Parse Command ID
+        byte commandId = data[offset++];
+        Log.d(TAG, "Command ID: " + String.format("0x%02X", commandId));
+
+        long notificationUid = (data[offset] & 0xFFL) |
+                ((data[offset + 1] & 0xFFL) << 8) |
+                ((data[offset + 2] & 0xFFL) << 16) |
+                ((data[offset + 3] & 0xFFL) << 24);
+        offset += 4;
+        Log.d(TAG, "Notification UID: " + notificationUid);
+
+        // Variables to store extracted attributes for Toast
+        String appIdentifier = "N/A";
+        String title = "N/A";
+        String message = "N/A";
+
+        // 3. Parse Attribute List (can contain multiple attributes)
+        final StringBuilder allDetails = new StringBuilder();
+        allDetails.append("Notification (UID: ").append(notificationUid).append("):\n");
+
+        while (offset < data.length) {
+            if (data.length < offset + 3) { // Need at least 1 byte Attribute ID + 2 bytes Length
+                Log.e(TAG, "通知详细内容数据不完整，无法解析更多属性");
+                break;
+            }
+
+            int attributeId = data[offset++] & 0xFF;
+            int length = (data[offset] & 0xFF) | ((data[offset + 1] & 0xFF) << 8);
+            offset += 2;
+
+            if (data.length < offset + length) {
+                Log.e(TAG, "通知详细内容数据不完整，属性内容长度不足");
+                break;
+            }
+
+            String content;
+            try {
+                content = new String(data, offset, length, java.nio.charset.StandardCharsets.UTF_8);
+            } catch (Exception e) {
+                Log.e(TAG, "解析属性内容时发生编码错误: " + e.getMessage());
+                content = "[解码失败]";
+            }
+            offset += length;
+
+            String attributeName = getAttributeName(attributeId);
+            String detail = String.format("  - %s: %s", attributeName, content);
+            Log.d(TAG, detail);
+            allDetails.append(detail).append("\n");
+
+            // Store the relevant attributes for the Toast
+            switch (attributeId) {
+                case NOTIFICATION_ATTRIBUTE_APP_IDENTIFIER:
+                    appIdentifier = content;
+                    break;
+                case NOTIFICATION_ATTRIBUTE_TITLE:
+                    title = content;
+                    break;
+                case NOTIFICATION_ATTRIBUTE_MESSAGE:
+                    message = content;
+                    break;
+                // You can add other cases if you want to store more attributes
+            }
         }
 
-        String content = new String(data, 3, length);
-        String attributeName = getAttributeName(attributeId);
-        
-        String detail = String.format("%s: %s", attributeName, content);
-        
+        final String finalAppIdentifier = appIdentifier;
+        final String finalTitle = title;
+        final String finalMessage = message;
+
         runOnUiThread(() -> {
-            tvNotifications.appendLog(detail);
+            tvNotifications.appendLog(allDetails.toString());
+
+            // Prepare the Toast message
+            String toastMessage = String.format("应用: %s\n标题: %s\n内容: %s",
+                    finalAppIdentifier, finalTitle, finalMessage);
+            // Display the Toast
+            ToastUtils.showShort(toastMessage);
         });
     }
 
