@@ -45,6 +45,10 @@
                   android:theme="@style/AppTheme.NoActionBar"
                   android:screenOrientation="portrait"
                   android:configChanges="keyboardHidden|orientation|navigation|screenSize|keyboard"/>
+        <activity android:name=".BleServerActivity" 
+                  android:theme="@style/AppTheme.NoActionBar"
+                  android:screenOrientation="portrait"
+                  android:configChanges="keyboardHidden|orientation|navigation|screenSize|keyboard"/>
     </application>
 
 </manifest>

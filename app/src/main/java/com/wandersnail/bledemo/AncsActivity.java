@@ -84,11 +84,15 @@ public class AncsActivity extends AppCompatActivity {
     private Button btnScan;
     private Button btnEnableNotifySource;
     private Button btnEnableDataSource;
+    private Button btnToggleServer;
+    private TextView tvServerStatus;
     private Handler handler = new Handler(Looper.getMainLooper());
     private boolean isScanning = false;
     private BluetoothLeScanner bluetoothLeScanner;
     private BluetoothGattCharacteristic notificationSourceChar;
     private BluetoothGattCharacteristic dataSourceChar;
+    private BleServer bleServer;
+    private Runnable serverStatusUpdater;
 
     private final BluetoothGattCallback gattCallback = new BluetoothGattCallback() {
         @SuppressLint("MissingPermission")
@@ -306,6 +310,8 @@ public class AncsActivity extends AppCompatActivity {
         btnScan = findViewById(R.id.btnScan);
         btnEnableNotifySource = findViewById(R.id.btnEnableNotifySource);
         btnEnableDataSource = findViewById(R.id.btnEnableDataSource);
+        btnToggleServer = findViewById(R.id.btnToggleServer);
+        tvServerStatus = findViewById(R.id.tvServerStatus);
 
         btnScan.setOnClickListener(v -> {
             if (isScanning) {
@@ -345,6 +351,38 @@ public class AncsActivity extends AppCompatActivity {
                 connectToDevice(device);
             } else {
                 Toast.makeText(this, "无效的MAC地址", Toast.LENGTH_SHORT).show();
+            }
+        });
+
+        btnToggleServer.setOnClickListener(v -> {
+            if (bleServer == null) {
+                // 创建并启动BLE服务器
+                bleServer = new BleServer(this);
+                boolean success = bleServer.startServer();
+                if (success) {
+                    btnToggleServer.setText("停止BLE服务器");
+                    tvServerStatus.setText("服务器状态: 运行中");
+                    tvStatus.appendLog("BLE服务器启动成功");
+                    Toast.makeText(this, "BLE服务器启动成功", Toast.LENGTH_SHORT).show();
+                    
+                    // 启动状态更新器
+                    startServerStatusUpdater();
+                } else {
+                    tvStatus.appendLog("BLE服务器启动失败");
+                    Toast.makeText(this, "BLE服务器启动失败", Toast.LENGTH_SHORT).show();
+                    bleServer = null;
+                }
+            } else {
+                // 停止BLE服务器
+                bleServer.stopServer();
+                btnToggleServer.setText("启动BLE服务器");
+                tvServerStatus.setText("服务器状态: 已停止");
+                tvStatus.appendLog("BLE服务器已停止");
+                Toast.makeText(this, "BLE服务器已停止", Toast.LENGTH_SHORT).show();
+                
+                // 停止状态更新器
+                stopServerStatusUpdater();
+                bleServer = null;
             }
         });
 
@@ -615,6 +653,39 @@ public class AncsActivity extends AppCompatActivity {
         stopScan();
         if (bluetoothGatt != null) {
             bluetoothGatt.close();
+        }
+        // 停止BLE服务器
+        if (bleServer != null) {
+            bleServer.stopServer();
+            bleServer = null;
+        }
+        // 停止状态更新器
+        stopServerStatusUpdater();
+    }
+
+    // 启动服务器状态更新器
+    private void startServerStatusUpdater() {
+        if (serverStatusUpdater == null) {
+            serverStatusUpdater = new Runnable() {
+                @Override
+                public void run() {
+                    if (bleServer != null && bleServer.isServerRunning()) {
+                        int heartbeatCount = bleServer.getHeartbeatCounter();
+                        int deviceCount = bleServer.getConnectedDeviceCount();
+                        tvServerStatus.setText(String.format("服务器状态: 运行中 (心跳: %d, 设备: %d)", heartbeatCount, deviceCount));
+                        // 每秒更新一次
+                        handler.postDelayed(this, 1000);
+                    }
+                }
+            };
+        }
+        handler.post(serverStatusUpdater);
+    }
+
+    // 停止服务器状态更新器
+    private void stopServerStatusUpdater() {
+        if (serverStatusUpdater != null) {
+            handler.removeCallbacks(serverStatusUpdater);
         }
     }
 

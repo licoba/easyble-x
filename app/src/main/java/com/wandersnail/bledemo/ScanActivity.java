@@ -76,6 +76,12 @@ public class ScanActivity extends BaseViewBindingActivity<ActivityScanBinding> {
             Intent intent = new Intent(this, AncsActivity.class);
             startActivity(intent);
         });
+        
+        Button btnBleServer = findViewById(R.id.btnBleServer);
+        btnBleServer.setOnClickListener(v -> {
+            Intent intent = new Intent(this, BleServerActivity.class);
+            startActivity(intent);
+        });
     }
 
     @Override
