@@ -1,14 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <uses-permission android:name="android.permission.BLUETOOTH"
-        android:maxSdkVersion="30" />
-    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"
-        android:maxSdkVersion="30" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"/>
-    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+    <!-- 基础蓝牙权限（所有Android版本） -->
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+    <!-- Android 12+ 细化权限 -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+    <!-- 蓝牙扫描可能需要位置权限（仅当扫描用于定位时） -->
+    <!-- 如果仅用于设备发现而非定位，可添加neverForLocation标记避免位置权限 -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"  />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- 硬件支持声明 -->
+    <uses-feature android:name="android.hardware.bluetooth" android:required="true" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
+
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
 
     <application
@@ -31,6 +38,10 @@
         <activity android:name=".SendFileActivity" android:screenOrientation="portrait"
                   android:configChanges="keyboardHidden|orientation|navigation|screenSize|keyboard"/>
         <activity android:name=".DebugConnectActivity" 
+                  android:theme="@style/AppTheme.NoActionBar"
+                  android:screenOrientation="portrait"
+                  android:configChanges="keyboardHidden|orientation|navigation|screenSize|keyboard"/>
+        <activity android:name=".AncsActivity" 
                   android:theme="@style/AppTheme.NoActionBar"
                   android:screenOrientation="portrait"
                   android:configChanges="keyboardHidden|orientation|navigation|screenSize|keyboard"/>

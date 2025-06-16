@@ -254,8 +254,7 @@ abstract class AbstractScanner implements Scanner {
             String msg = String.format(Locale.getDefault(), "✅found device! [name: %s, addr: %s, type: %s]",
                     TextUtils.isEmpty(name) ? "N/A" : name, device.getAddress(), deviceType);
 
-
-            BluetoothDeviceLogger.getInstance().logDeviceInfo(device);
+//            BluetoothDeviceLogger.getInstance().logDeviceInfo(device);
 
             logger.log(Log.DEBUG, Logger.TYPE_SCAN_STATE, msg);
         });

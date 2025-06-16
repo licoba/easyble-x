@@ -13,6 +13,7 @@ import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
+import android.widget.Button;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -66,7 +67,13 @@ public class ScanActivity extends BaseViewBindingActivity<ActivityScanBinding> {
 
         binding.btnDebugConnect.setOnClickListener(v -> {
             shouldAutoScan = false;
-            Intent intent = new Intent(ScanActivity.this, DebugConnectActivity.class);
+            Intent intent = new Intent(this, DebugConnectActivity.class);
+            startActivity(intent);
+        });
+        
+        Button btnAncs = findViewById(R.id.btnAncs);
+        btnAncs.setOnClickListener(v -> {
+            Intent intent = new Intent(this, AncsActivity.class);
             startActivity(intent);
         });
     }
@@ -94,7 +101,8 @@ public class ScanActivity extends BaseViewBindingActivity<ActivityScanBinding> {
         @Override
         public void onScanResult(@NonNull Device device, boolean isConnectedBySys) {
             binding.layoutEmpty.setVisibility(View.INVISIBLE);
-            listAdapter.add(device);
+            if(device.getRssi() >= -50)
+                listAdapter.add(device);
         }
 
         @Override
@@ -228,7 +236,7 @@ public class ScanActivity extends BaseViewBindingActivity<ActivityScanBinding> {
                     
                     // 设置设备类型
                     String deviceType = "UNKNOWN";
-                    int type = device.getOriginDevice().getType();
+                    @SuppressLint("MissingPermission") int type = device.getOriginDevice().getType();
                     switch (type) {
                         case BluetoothDevice.DEVICE_TYPE_CLASSIC:
                             deviceType = "CLASSIC";

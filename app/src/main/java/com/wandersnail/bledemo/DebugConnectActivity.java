@@ -17,6 +17,7 @@ import android.bluetooth.BluetoothHeadset;
 import android.bluetooth.BluetoothProfile;
 import android.bluetooth.BluetoothProfile.ServiceListener;
 import android.content.Context;
+import android.content.Intent;
 import android.os.Bundle;
 import android.text.TextUtils;
 import android.util.Log;
@@ -42,6 +43,7 @@ public class DebugConnectActivity extends AppCompatActivity {
     private Button btnDisconnect;
     private Button btnManualDisconnect;
     private Button btnGetDeviceInfo;
+    private Button btnAncs;
     private TextView tvStatus;
     private TextView tvServices;
     private RadioGroup rgTransport;
@@ -247,6 +249,7 @@ public class DebugConnectActivity extends AppCompatActivity {
         btnDisconnect = findViewById(R.id.btnDisconnect);
         btnManualDisconnect = findViewById(R.id.btnManualDisconnect);
         btnGetDeviceInfo = findViewById(R.id.btnGetDeviceInfo);
+        btnAncs = findViewById(R.id.btnAncs);
         tvStatus = findViewById(R.id.tvStatus);
         tvServices = findViewById(R.id.tvServices);
         rgTransport = findViewById(R.id.rgTransport);
@@ -261,6 +264,10 @@ public class DebugConnectActivity extends AppCompatActivity {
         btnDisconnect.setOnClickListener(v -> disconnectDevice());
         btnManualDisconnect.setOnClickListener(v -> manualDisconnectGatt());
         btnGetDeviceInfo.setOnClickListener(v -> getDeviceInfo());
+        btnAncs.setOnClickListener(v -> {
+            Intent intent = new Intent(this, AncsActivity.class);
+            startActivity(intent);
+        });
     }
 
     @SuppressLint("MissingPermission")
