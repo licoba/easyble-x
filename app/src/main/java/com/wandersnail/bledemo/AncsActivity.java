@@ -224,6 +224,22 @@ public class AncsActivity extends AppCompatActivity {
         }
 
         @Override
+        public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
+            Log.d(TAG, "onCharacteristicWrite: status=" + status + ", UUID=" + characteristic.getUuid());
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                Log.i(TAG, "特征值写入成功");
+                runOnUiThread(() -> {
+                    tvStatus.appendLog("特征值写入成功");
+                });
+            } else {
+                Log.e(TAG, "特征值写入失败: " + status);
+                runOnUiThread(() -> {
+                    tvStatus.appendLog("特征值写入失败: " + status);
+                });
+            }
+        }
+
+        @Override
         public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
             // 处理接收到的ANCS通知数据
             if (characteristic.getUuid().equals(NOTIFICATION_SOURCE_UUID)) {
@@ -255,13 +271,13 @@ public class AncsActivity extends AppCompatActivity {
             if(result.getRssi() < -50) return;
             Log.d(TAG, "发现设备: " + deviceName + " (" + device.getAddress() + "), RSSI: " + rssi);
             // 检查是否有指定的MAC地址
-            String targetMac = etMacAddress.getText().toString().trim();
-            if (!targetMac.isEmpty()) {
-                // 如果输入框有MAC地址，只连接匹配的设备
-                if (!device.getAddress().startsWith(targetMac)) {
-                    return;
-                }
-            }
+//            String targetMac = etMacAddress.getText().toString().trim();
+//            if (!targetMac.isEmpty()) {
+//                // 如果输入框有MAC地址，只连接匹配的设备
+//                if (!device.getAddress().startsWith(targetMac)) {
+//                    return;
+//                }
+//            }
 
             // 检查设备是否支持ANCS服务
             if (isAncsDevice(result.getScanRecord())) {
