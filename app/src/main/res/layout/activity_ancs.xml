@@ -21,7 +21,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:hint="MAC地址" />
+            android:text="20:32:C6:C3:05:EE" />
 
         <Button
             android:id="@+id/btnConnect"
