@@ -1,5 +1,7 @@
 package com.wandersnail.bledemo;
 
+import static android.text.TextUtils.replace;
+
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
@@ -249,7 +251,7 @@ public class AncsActivity extends AppCompatActivity {
 //            }
 
             // 检查设备是否支持ANCS服务
-            if (isAncsDevice(result.getScanRecord()) && deviceName!=null && deviceName.contains("iPhone")) {
+            if (isAncsDevice(result.getScanRecord()) && deviceName != null && deviceName.contains("iPhone")) {
                 Log.i(TAG, "找到支持ANCS的设备: " + deviceName + " (" + device.getAddress() + ")");
                 stopScan();
                 connectToDevice(device);
@@ -269,18 +271,17 @@ public class AncsActivity extends AppCompatActivity {
 
     private boolean isAncsDevice(ScanRecord scanRecord) {
         if (scanRecord == null) return false;
-        // 获取设备广播的服务UUID列表
-        List<ParcelUuid> serviceUuids = scanRecord.getServiceUuids();
-        // 打印serviceUuids
-        Log.d(TAG, "serviceUuids: " + serviceUuids);
         // 检查是否是Apple设备
         byte[] manufacturerData = scanRecord.getManufacturerSpecificData(0x004C); // Apple's company identifier
         if (manufacturerData == null) {
             Log.d(TAG, "不是Apple设备");
             return false;
         }
-        Log.d(TAG, "是Apple设备");
-        return true;
+        if(bytesToHex(scanRecord.getBytes()).replace(" ","").startsWith("02011A")){
+            Log.d(TAG, "是Apple的ANCS设备");
+            return true;
+        }
+        return false;
     }
     
     private String bytesToHex(byte[] bytes) {
@@ -446,15 +447,18 @@ public class AncsActivity extends AppCompatActivity {
             if (bluetoothLeScanner != null) {
                 // 优化扫描设置
                 ScanSettings settings = new ScanSettings.Builder()
-                        .setScanMode(ScanSettings.SCAN_MODE_BALANCED)
+                        .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY) // 低延迟模式(低功耗)
                         .setReportDelay(0) // 立即报告结果
-                        .setNumOfMatches(ScanSettings.MATCH_NUM_MAX_ADVERTISEMENT) // 匹配所有广播
+                        .setMatchMode(ScanSettings.MATCH_MODE_AGGRESSIVE) // 匹配所有广播
                         .build();
                 
                 // 创建扫描过滤器
                 List<ScanFilter> filters = new ArrayList<>();
-                // 可以添加特定的过滤器，比如服务UUID
-                // filters.add(new ScanFilter.Builder().setServiceUuid(ParcelUuid.fromString("YOUR-SERVICE-UUID")).build());
+                // 添加苹果厂商数据过滤器 (Apple's company identifier: 0x004C)
+                ScanFilter appleManufacturerFilter = new ScanFilter.Builder()
+                        .setManufacturerData(0x004C, new byte[]{}) // Pass an empty byte array for data and dataMask to match any Apple manufacturer data
+                        .build();
+                filters.add(appleManufacturerFilter);
                 
                 bluetoothLeScanner.startScan(filters, settings, scanCallback);
             } else {
@@ -491,8 +495,8 @@ public class AncsActivity extends AppCompatActivity {
         if (device.getBondState() != BluetoothDevice.BOND_BONDED) {
             device.createBond();
         }
-        
-        bluetoothGatt = device.connectGatt(this, false, gattCallback);
+
+        bluetoothGatt = device.connectGatt(this, false, gattCallback,BluetoothDevice.TRANSPORT_LE);
     }
 
 
@@ -587,17 +591,16 @@ public class AncsActivity extends AppCompatActivity {
 
         String eventType = getEventTypeString(eventId);
         String category = getCategoryString(categoryId);
-        String flags = getEventFlagsString(eventFlags);
 
-        String notification = String.format("通知ID: %d\n类型: %s\n分类: %s\n标志: %s",
-                notificationUid, eventType, category, flags);
+        @SuppressLint("DefaultLocale") String notification = String.format("通知ID: %d\n类型: %s\n分类: %s\n",
+                notificationUid, eventType, category);
 
         runOnUiThread(() -> {
             tvNotifications.appendLog(notification);
         });
 
         // 如果是新通知，请求详细内容
-        if (eventId == 0) { // 0 表示添加新通知
+        if (eventId == 0 && categoryId == 4) { // 0 表示添加新通知
             requestNotificationDetails(notificationUid);
         }
     }
@@ -615,27 +618,20 @@ public class AncsActivity extends AppCompatActivity {
         switch (categoryId) {
             case 0: return "其他";
             case 1: return "来电";
-            case 2: return "短信";
-            case 3: return "邮件";
-            case 4: return "日历";
-            case 5: return "提醒";
-            case 6: return "社交";
-            case 7: return "健康";
-            case 8: return "游戏";
-            case 9: return "其他";
-            default: return "未知";
+            case 2: return "未接来电";
+            case 3: return "语音邮件";
+            case 4: return "社交";
+            case 5: return "日程";
+            case 6: return "邮件";
+            case 7: return "新闻";
+            case 8: return "健康与健身";
+            case 9: return "商业/金融";
+            case 10: return "位置";
+            case 11: return "娱乐";
+            default: return "未知类别";
         }
     }
 
-    private String getEventFlagsString(int flags) {
-        StringBuilder sb = new StringBuilder();
-        if ((flags & 0x01) != 0) sb.append("静音 ");
-        if ((flags & 0x02) != 0) sb.append("重要 ");
-        if ((flags & 0x04) != 0) sb.append("预存在 ");
-        if ((flags & 0x08) != 0) sb.append("正面 ");
-        if ((flags & 0x10) != 0) sb.append("负面 ");
-        return sb.toString().trim();
-    }
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
@@ -783,7 +779,7 @@ public class AncsActivity extends AppCompatActivity {
             BluetoothGattCharacteristic controlPoint = ancsService.getCharacteristic(CONTROL_POINT_UUID);
             if (controlPoint != null) {
                 // 构建获取通知属性的命令
-                byte[] command = new byte[17];
+                byte[] command = new byte[14];  // 修改为14字节：1(命令) + 4(UID) + 3(AppIdentifier) + 3(Title) + 3(Message)
                 command[0] = COMMAND_GET_NOTIFICATION_ATTRIBUTES;  // CommandID for GetNotificationAttributes
                 // UID (4 bytes)
                 command[1] = (byte) (notificationUid & 0xFF);
@@ -802,10 +798,6 @@ public class AncsActivity extends AppCompatActivity {
                 command[11] = NOTIFICATION_ATTRIBUTE_MESSAGE;
                 command[12] = (byte) 0xFF;
                 command[13] = (byte) 0xFF;
-                // Date
-                command[14] = NOTIFICATION_ATTRIBUTE_DATE;
-                command[15] = (byte) 0xFF;
-                command[16] = (byte) 0xFF;
 
                 controlPoint.setValue(command);
                 boolean success = bluetoothGatt.writeCharacteristic(controlPoint);
@@ -821,7 +813,6 @@ public class AncsActivity extends AppCompatActivity {
     }
 
     // 解析通知详细内容
-
     private void parseNotificationDetails(byte[] data) {
         if (data == null || data.length < 5) { // Minimum length: 1 byte Command ID + 4 bytes Notification UID
             Log.e(TAG, "通知详细内容数据长度不足或为null");
@@ -890,7 +881,6 @@ public class AncsActivity extends AppCompatActivity {
                 case NOTIFICATION_ATTRIBUTE_MESSAGE:
                     message = content;
                     break;
-                // You can add other cases if you want to store more attributes
             }
         }
 
