@@ -672,7 +672,10 @@ public class AncsActivity extends AppCompatActivity {
                     if (bleServer != null && bleServer.isServerRunning()) {
                         int heartbeatCount = bleServer.getHeartbeatCounter();
                         int deviceCount = bleServer.getConnectedDeviceCount();
-                        tvServerStatus.setText(String.format("服务器状态: 运行中 (心跳: %d, 设备: %d)", heartbeatCount, deviceCount));
+                        boolean isAdvertising = bleServer.isAdvertising();
+                        String status = String.format("服务器状态: 运行中 (心跳: %d, 设备: %d, 广播: %s)", 
+                                heartbeatCount, deviceCount, isAdvertising ? "开启" : "关闭");
+                        tvServerStatus.setText(status);
                         // 每秒更新一次
                         handler.postDelayed(this, 1000);
                     }
@@ -746,10 +749,14 @@ public class AncsActivity extends AppCompatActivity {
     // 请求蓝牙权限
     private void requestBluetoothPermissions() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // Android 12+：请求 BLUETOOTH_SCAN 和 BLUETOOTH_CONNECT
+            // Android 12+：请求 BLUETOOTH_SCAN、BLUETOOTH_CONNECT 和 BLUETOOTH_ADVERTISE
             ActivityCompat.requestPermissions(
                     this,
-                    new String[]{Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT},
+                    new String[]{
+                            Manifest.permission.BLUETOOTH_SCAN, 
+                            Manifest.permission.BLUETOOTH_CONNECT,
+                            Manifest.permission.BLUETOOTH_ADVERTISE
+                    },
                     REQUEST_BLUETOOTH_PERMISSIONS
             );
         } else {
@@ -765,11 +772,12 @@ public class AncsActivity extends AppCompatActivity {
 
     // 检查蓝牙权限是否已授予
     private boolean checkBluetoothPermissions() {
-        // Android 12及以上版本需要BLUETOOTH_SCAN和BLUETOOTH_CONNECT权限
+        // Android 12及以上版本需要BLUETOOTH_SCAN、BLUETOOTH_CONNECT和BLUETOOTH_ADVERTISE权限
         // Android 6.0-11版本需要位置权限（因为旧版蓝牙API依赖位置服务）
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             return ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
-                    && ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED;
+                    && ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+                    && ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED;
         } else {
             return ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
         }
@@ -945,5 +953,13 @@ public class AncsActivity extends AppCompatActivity {
                 Log.d(TAG, "已发送通知操作请求");
             }
         }
+    }
+
+    // 检查广播权限
+    private boolean checkAdvertisingPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            return ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED;
+        }
+        return true; // Android 12以下版本不需要此权限
     }
 } 
