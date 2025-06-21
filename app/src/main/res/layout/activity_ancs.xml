@@ -80,15 +80,7 @@
     </LinearLayout>
 
     <com.wandersnail.bledemo.LogTextView
-        android:id="@+id/tvStatus"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:padding="16dp"
-        android:textSize="12sp" />
-
-    <com.wandersnail.bledemo.LogTextView
-        android:id="@+id/tvNotifications"
+        android:id="@+id/tvLog"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
