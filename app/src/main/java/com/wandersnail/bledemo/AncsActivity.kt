@@ -30,9 +30,7 @@ import com.wandersnail.bledemo.databinding.ActivityAncsBinding
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.nio.charset.StandardCharsets
 import java.util.Locale
-import java.util.UUID
 
 class AncsActivity : AppCompatActivity() {
     private lateinit var binding: ActivityAncsBinding
@@ -47,6 +45,7 @@ class AncsActivity : AppCompatActivity() {
     private var scanTimeoutJob: Job? = null
     private val triedDevices: MutableSet<String> = HashSet()
     private var isServiceDiscovered = false
+    private val ancsUtil = ANCSUtil()
 
     private fun logAndUpdateUI(level: Int, message: String) {
         when (level) {
@@ -90,11 +89,12 @@ class AncsActivity : AppCompatActivity() {
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
             logAndUpdateUI("服务发现: status=$status")
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                val ancsService = gatt.getService(ANCS_SERVICE_UUID)
+                val ancsService = ancsUtil.getAncsService(gatt)
                 if (ancsService != null) {
                     logAndUpdateUI("发现ANCS服务")
                     isServiceDiscovered = true
-                    notificationSourceChar = ancsService.getCharacteristic(NOTIFICATION_SOURCE_UUID)
+
+                    notificationSourceChar = ancsUtil.getNotificationSourceCharacteristic(gatt)
                     if (notificationSourceChar != null) {
                         logAndUpdateUI("找到Notification Source特征")
                         binding.btnEnableNotifySource.isEnabled = true
@@ -102,7 +102,8 @@ class AncsActivity : AppCompatActivity() {
                         logAndUpdateUI(Log.ERROR, "未找到Notification Source特征")
                         binding.btnEnableNotifySource.isEnabled = false
                     }
-                    dataSourceChar = ancsService.getCharacteristic(DATA_SOURCE_UUID)
+
+                    dataSourceChar = ancsUtil.getDataSourceCharacteristic(gatt)
                     if (dataSourceChar != null) {
                         logAndUpdateUI("找到Data Source特征")
                         binding.btnEnableDataSource.isEnabled = true
@@ -126,11 +127,7 @@ class AncsActivity : AppCompatActivity() {
             }
         }
 
-        override fun onDescriptorWrite(
-            gatt: BluetoothGatt,
-            descriptor: BluetoothGattDescriptor,
-            status: Int
-        ) {
+        override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
             logAndUpdateUI("描述符写入: status=$status")
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 Log.i(TAG, "描述符写入成功")
@@ -139,11 +136,7 @@ class AncsActivity : AppCompatActivity() {
             }
         }
 
-        override fun onCharacteristicWrite(
-            gatt: BluetoothGatt,
-            characteristic: BluetoothGattCharacteristic,
-            status: Int
-        ) {
+        override fun onCharacteristicWrite(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
             logAndUpdateUI("特征值写入: status=$status, UUID=${characteristic.uuid}")
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 logAndUpdateUI("特征值写入成功")
@@ -152,17 +145,14 @@ class AncsActivity : AppCompatActivity() {
             }
         }
 
-        override fun onCharacteristicChanged(
-            gatt: BluetoothGatt,
-            characteristic: BluetoothGattCharacteristic
-        ) {
-            if (characteristic.uuid == NOTIFICATION_SOURCE_UUID) {
+        override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
+            if (characteristic.uuid == ANCSUtil.NOTIFICATION_SOURCE_UUID) {
                 val data = characteristic.value
                 if (data != null && data.size > 0) {
                     logAndUpdateUI("收到ANCS通知数据，长度: ${data.size}")
                     parseAncsNotification(data)
                 }
-            } else if (characteristic.uuid == DATA_SOURCE_UUID) {
+            } else if (characteristic.uuid == ANCSUtil.DATA_SOURCE_UUID) {
                 val data = characteristic.value
                 if (data != null && data.size > 0) {
                     logAndUpdateUI("收到通知详细内容，长度: ${data.size}")
@@ -196,10 +186,7 @@ class AncsActivity : AppCompatActivity() {
             }
 
             if (deviceName != null && deviceName.lowercase(Locale.getDefault()).contains("ancs")) {
-                Log.i(
-                    TAG,
-                    "找到名称包含ANCS的设备: $deviceName ($deviceAddress)"
-                )
+                Log.i(TAG, "找到名称包含ANCS的设备: $deviceName ($deviceAddress)")
                 triedDevices.add(deviceAddress)
                 stopScan()
                 connectToDevice(device)
@@ -276,7 +263,6 @@ class AncsActivity : AppCompatActivity() {
                     binding.tvServerStatus.text = "服务器状态: 运行中"
                     logAndUpdateUI("BLE服务器启动成功")
                     Toast.makeText(this, "BLE服务器启动成功", Toast.LENGTH_SHORT).show()
-
                     startServerStatusUpdater()
                 } else {
                     logAndUpdateUI("BLE服务器启动失败")
@@ -289,7 +275,6 @@ class AncsActivity : AppCompatActivity() {
                 binding.tvServerStatus.text = "服务器状态: 已停止"
                 logAndUpdateUI("BLE服务器已停止")
                 Toast.makeText(this, "BLE服务器已停止", Toast.LENGTH_SHORT).show()
-
                 stopServerStatusUpdater()
                 bleServer = null
             }
@@ -299,8 +284,7 @@ class AncsActivity : AppCompatActivity() {
         bluetoothAdapter = bluetoothManager.adapter
 
         if (bluetoothAdapter == null) {
-            Toast.makeText(this, "Bluetooth is not supported on this device", Toast.LENGTH_LONG)
-                .show()
+            Toast.makeText(this, "Bluetooth is not supported on this device", Toast.LENGTH_LONG).show()
             finish()
             return
         }
@@ -319,10 +303,7 @@ class AncsActivity : AppCompatActivity() {
 
             for (device in bluetoothAdapter!!.bondedDevices) {
                 if (device.type == BluetoothDevice.DEVICE_TYPE_LE) {
-                    Log.i(
-                        TAG,
-                        "找到LE设备: " + device.address
-                    )
+                    Log.i(TAG, "找到LE设备: ${device.address}")
                     return device
                 }
             }
@@ -336,7 +317,6 @@ class AncsActivity : AppCompatActivity() {
     private fun startScan() {
         if (!isScanning) {
             logAndUpdateUI("正在扫描BLE设备...")
-
             triedDevices.clear()
             logAndUpdateUI("清空已尝试设备记录，重新开始扫描")
 
@@ -382,7 +362,7 @@ class AncsActivity : AppCompatActivity() {
 
     @SuppressLint("MissingPermission")
     private fun connectToDevice(device: BluetoothDevice) {
-        Log.i(TAG, "开始连接设备: " + device.address)
+        Log.i(TAG, "开始连接设备: ${device.address}")
         logAndUpdateUI("正在连接到设备...")
 
         if (device.bondState != BluetoothDevice.BOND_BONDED) {
@@ -401,7 +381,7 @@ class AncsActivity : AppCompatActivity() {
                 return
             }
 
-            val descriptor = dataSourceChar!!.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG)
+            val descriptor = dataSourceChar!!.getDescriptor(ANCSUtil.CLIENT_CHARACTERISTIC_CONFIG)
             if (descriptor != null) {
                 descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
                 val writeSuccess = bluetoothGatt!!.writeDescriptor(descriptor)
@@ -418,14 +398,13 @@ class AncsActivity : AppCompatActivity() {
     @SuppressLint("MissingPermission")
     private fun enableNotificationSource() {
         if (notificationSourceChar != null) {
-            val success =
-                bluetoothGatt!!.setCharacteristicNotification(notificationSourceChar, true)
+            val success = bluetoothGatt!!.setCharacteristicNotification(notificationSourceChar, true)
             if (!success) {
                 logAndUpdateUI(Log.ERROR, "启用Notification Source通知失败")
                 return
             }
 
-            val descriptor = notificationSourceChar!!.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG)
+            val descriptor = notificationSourceChar!!.getDescriptor(ANCSUtil.CLIENT_CHARACTERISTIC_CONFIG)
             if (descriptor != null) {
                 descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
                 val writeSuccess = bluetoothGatt!!.writeDescriptor(descriptor)
@@ -439,64 +418,55 @@ class AncsActivity : AppCompatActivity() {
         }
     }
 
-    @SuppressLint("DefaultLocale")
     private fun parseAncsNotification(data: ByteArray) {
-        if (data.size < 8) {
-            Log.e(TAG, "通知数据长度不足: " + data.size)
-            return
-        }
+        val notificationInfo = ancsUtil.parseAncsNotification(data)
+        if (notificationInfo != null) {
+            logAndUpdateUI("解析通知数据: eventId=${notificationInfo.eventId}, flags=${notificationInfo.eventFlags}, categoryId=${notificationInfo.categoryId}, uid=${notificationInfo.notificationUid}")
+            
+            val notification = "通知ID: ${notificationInfo.notificationUid}\n类型: ${notificationInfo.eventType}\n分类: ${notificationInfo.category}\n"
+            logAndUpdateUI(notification)
 
-        val eventId = data[0].toInt() and 0xFF
-        val eventFlags = data[1].toInt() and 0xFF
-        val categoryId = data[2].toInt() and 0xFF
-        val categoryCount = data[3].toInt() and 0xFF
-        val notificationUid =
-            (data[4].toInt() and 0xFF) or ((data[5].toInt() and 0xFF) shl 8) or ((data[6].toInt() and 0xFF) shl 16) or ((data[7].toInt() and 0xFF) shl 24)
-
-        logAndUpdateUI(String.format(
-            "解析通知数据: eventId=%d, flags=%d, categoryId=%d, uid=%d",
-            eventId, eventFlags, categoryId, notificationUid
-        ))
-
-        val eventType = getEventTypeString(eventId)
-        val category = getCategoryString(categoryId)
-
-        @SuppressLint("DefaultLocale") val notification = String.format(
-            "通知ID: %d\n类型: %s\n分类: %s\n",
-            notificationUid, eventType, category
-        )
-
-        logAndUpdateUI(notification)
-
-        if (eventId == 0 && categoryId == 4) {
-            requestNotificationDetails(notificationUid)
+            if (ancsUtil.isNewSocialNotification(notificationInfo.eventId, notificationInfo.categoryId)) {
+                requestNotificationDetails(notificationInfo.notificationUid)
+            }
         }
     }
 
-    private fun getEventTypeString(eventId: Int): String {
-        return when (eventId) {
-            0 -> "添加"
-            1 -> "修改"
-            2 -> "删除"
-            else -> "未知"
+    @SuppressLint("MissingPermission")
+    private fun requestNotificationDetails(notificationUid: Int) {
+        val controlPoint = ancsUtil.getControlPointCharacteristic(bluetoothGatt!!)
+        if (controlPoint != null) {
+            val command = ancsUtil.buildGetNotificationAttributesCommand(notificationUid)
+            controlPoint.setValue(command)
+            val success = bluetoothGatt!!.writeCharacteristic(controlPoint)
+            
+            val commandHex = command.joinToString(" ") { String.format("%02X", it) }
+            logAndUpdateUI("发送获取通知详细内容的请求: $success, command: $commandHex")
+            
+            if (!success) {
+                logAndUpdateUI(Log.ERROR, "写入特征值失败")
+            }
         }
     }
 
-    private fun getCategoryString(categoryId: Int): String {
-        return when (categoryId) {
-            0 -> "其他"
-            1 -> "来电"
-            2 -> "未接来电"
-            3 -> "语音邮件"
-            4 -> "社交"
-            5 -> "日程"
-            6 -> "邮件"
-            7 -> "新闻"
-            8 -> "健康与健身"
-            9 -> "商业/金融"
-            10 -> "位置"
-            11 -> "娱乐"
-            else -> "未知类别"
+    private fun parseNotificationDetails(data: ByteArray?) {
+        val details = ancsUtil.parseNotificationDetails(data)
+        if (details != null) {
+            logAndUpdateUI("Command ID: ${String.format("0x%02X", details.commandId)}")
+            logAndUpdateUI("Notification UID: ${details.notificationUid}")
+
+            val allDetails = StringBuilder()
+            allDetails.append("Notification (UID: ${details.notificationUid}):\n")
+            
+            details.attributes.forEach { (name, value) ->
+                val detail = "  - $name: $value"
+                logAndUpdateUI(detail)
+                allDetails.append(detail).append("\n")
+            }
+
+            logAndUpdateUI(allDetails.toString())
+            val msg = "ANCS消息\n应用: ${details.appIdentifier}\n标题: ${details.title}\n内容: ${details.message}"
+            PopNotification.show(msg)
         }
     }
 
@@ -642,167 +612,10 @@ class AncsActivity : AppCompatActivity() {
         }
     }
 
-    @SuppressLint("MissingPermission")
-    private fun requestNotificationDetails(notificationUid: Int) {
-        val ancsService = bluetoothGatt!!.getService(ANCS_SERVICE_UUID)
-        if (ancsService != null) {
-            val controlPoint = ancsService.getCharacteristic(CONTROL_POINT_UUID)
-            if (controlPoint != null) {
-                val command =
-                    ByteArray(14)
-                command[0] =
-                    COMMAND_GET_NOTIFICATION_ATTRIBUTES
-                command[1] = (notificationUid and 0xFF).toByte()
-                command[2] = ((notificationUid shr 8) and 0xFF).toByte()
-                command[3] = ((notificationUid shr 16) and 0xFF).toByte()
-                command[4] = ((notificationUid shr 24) and 0xFF).toByte()
-                command[5] = NOTIFICATION_ATTRIBUTE_APP_IDENTIFIER
-                command[6] = 0xFF.toByte()
-                command[7] = 0xFF.toByte()
-                command[8] = NOTIFICATION_ATTRIBUTE_TITLE
-                command[9] = 0xFF.toByte()
-                command[10] = 0xFF.toByte()
-                command[11] = NOTIFICATION_ATTRIBUTE_MESSAGE
-                command[12] = 0xFF.toByte()
-                command[13] = 0xFF.toByte()
-
-                controlPoint.setValue(command)
-                val success = bluetoothGatt!!.writeCharacteristic(controlPoint)
-                logAndUpdateUI("发送获取通知详细内容的请求: $success, command:" + String.format(
-                    "%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
-                    command[0],
-                    command[1],
-                    command[2],
-                    command[3],
-                    command[4],
-                    command[5],
-                    command[6],
-                    command[7],
-                    command[8],
-                    command[9], command[10], command[11], command[12], command[13]
-                ))
-                if (!success) {
-                    logAndUpdateUI(Log.ERROR, "写入特征值失败")
-                }
-            }
-        }
-    }
-
-    private fun parseNotificationDetails(data: ByteArray?) {
-        if (data == null || data.size < 5) {
-            Log.e(TAG, "通知详细内容数据长度不足或为null")
-            return
-        }
-
-        var offset = 0
-
-        val commandId = data[offset++]
-        logAndUpdateUI("Command ID: " + String.format("0x%02X", commandId))
-
-        val notificationUid = (data[offset].toLong() and 0xFFL) or
-                ((data[offset + 1].toLong() and 0xFFL) shl 8) or
-                ((data[offset + 2].toLong() and 0xFFL) shl 16) or
-                ((data[offset + 3].toLong() and 0xFFL) shl 24)
-        offset += 4
-        logAndUpdateUI("Notification UID: $notificationUid")
-
-        var appIdentifier = "N/A"
-        var title = "N/A"
-        var message = "N/A"
-
-        val allDetails = StringBuilder()
-        allDetails.append("Notification (UID: ").append(notificationUid).append("):\n")
-
-        while (offset < data.size) {
-            if (data.size < offset + 3) {
-                Log.e(TAG, "通知详细内容数据不完整，无法解析更多属性")
-                break
-            }
-
-            val attributeId = data[offset++].toInt() and 0xFF
-            val length =
-                (data[offset].toInt() and 0xFF) or ((data[offset + 1].toInt() and 0xFF) shl 8)
-            offset += 2
-
-            if (data.size < offset + length) {
-                Log.e(TAG, "通知详细内容数据不完整，属性内容长度不足")
-                break
-            }
-
-            var content: String
-            try {
-                content = String(data, offset, length, StandardCharsets.UTF_8)
-            } catch (e: Exception) {
-                Log.e(TAG, "解析属性内容时发生编码错误: " + e.message)
-                content = "[解码失败]"
-            }
-            offset += length
-
-            val attributeName = getAttributeName(attributeId)
-            val detail = String.format("  - %s: %s", attributeName, content)
-            logAndUpdateUI(detail)
-            allDetails.append(detail).append("\n")
-
-            when (attributeId) {
-                NOTIFICATION_ATTRIBUTE_APP_IDENTIFIER.toInt() -> appIdentifier = content
-                NOTIFICATION_ATTRIBUTE_TITLE.toInt() -> title = content
-                NOTIFICATION_ATTRIBUTE_MESSAGE.toInt() -> message = content
-            }
-        }
-
-        val finalAppIdentifier = appIdentifier
-        val finalTitle = title
-        val finalMessage = message
-
-        logAndUpdateUI(allDetails.toString())
-        val msg = "ANCS消息\n" + String.format(
-            "应用: %s\n标题: %s\n内容: %s",
-            finalAppIdentifier, finalTitle, finalMessage
-        )
-        PopNotification.show(msg)
-    }
-
-    private fun getAttributeName(attributeId: Int): String {
-        return when (attributeId) {
-            NOTIFICATION_ATTRIBUTE_APP_IDENTIFIER.toInt() -> "应用"
-            NOTIFICATION_ATTRIBUTE_TITLE.toInt() -> "标题"
-            NOTIFICATION_ATTRIBUTE_SUBTITLE.toInt() -> "副标题"
-            NOTIFICATION_ATTRIBUTE_MESSAGE.toInt() -> "内容"
-            NOTIFICATION_ATTRIBUTE_DATE.toInt() -> "时间"
-            else -> "未知属性"
-        }
-    }
-
     companion object {
         private const val TAG = "AncsActivity"
-
-        private val ANCS_SERVICE_UUID: UUID =
-            UUID.fromString("7905F431-B5CE-4E99-A40F-4B1E122D00D0")
-        private val NOTIFICATION_SOURCE_UUID: UUID =
-            UUID.fromString("9FBF120D-6301-42D9-8C58-25E699A21DBD")
-        private val CONTROL_POINT_UUID: UUID =
-            UUID.fromString("69D1D8F3-45E1-49A8-9821-9BBDFDAAD9D9")
-        private val DATA_SOURCE_UUID: UUID = UUID.fromString("22EAC6E9-24D6-4BB5-BE44-B36ACE7C7BFB")
-
-        private val CLIENT_CHARACTERISTIC_CONFIG: UUID =
-            UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
-
         private const val REQUEST_BLUETOOTH_PERMISSIONS = 1001
-
         private const val REQUEST_ENABLE_BT = 1002
-
-        private const val COMMAND_GET_NOTIFICATION_ATTRIBUTES: Byte = 0x00
-        private const val COMMAND_GET_APP_ATTRIBUTES: Byte = 0x01
-        private const val COMMAND_PERFORM_NOTIFICATION_ACTION: Byte = 0x02
-
-        private const val NOTIFICATION_ATTRIBUTE_APP_IDENTIFIER: Byte = 0x00
-        private const val NOTIFICATION_ATTRIBUTE_TITLE: Byte = 0x01
-        private const val NOTIFICATION_ATTRIBUTE_SUBTITLE: Byte = 0x02
-        private const val NOTIFICATION_ATTRIBUTE_MESSAGE: Byte = 0x03
-        private const val NOTIFICATION_ATTRIBUTE_MESSAGE_SIZE: Byte = 0x04
-        private const val NOTIFICATION_ATTRIBUTE_DATE: Byte = 0x05
-        private const val NOTIFICATION_ATTRIBUTE_POSITIVE_ACTION_LABEL: Byte = 0x06
-        private const val NOTIFICATION_ATTRIBUTE_NEGATIVE_ACTION_LABEL: Byte = 0x07
         private const val SCAN_PERIOD: Long = 10000
     }
 }
