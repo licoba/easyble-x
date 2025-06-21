@@ -531,7 +531,6 @@ class AncsActivity : AppCompatActivity() {
             delay(1000)
             enableDataSource()
             isNotificationsEnabled = true
-            logAndUpdateUI("所有通知已启用")
         }
     }
 

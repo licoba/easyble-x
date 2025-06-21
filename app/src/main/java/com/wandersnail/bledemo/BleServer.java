@@ -30,9 +30,9 @@ public class BleServer {
     private static final String TAG = "BleServer";
 
     // 使用更标准的UUID格式，便于识别
-    private static final UUID HEARTBEAT_SERVICE_UUID = UUID.fromString("12345678-1234-1234-1234-123456789ABC");
+    private static final UUID HEARTBEAT_SERVICE_UUID = UUID.fromString("0000FFE0-0000-1000-8000-00805F9B34FB");
     // 心跳特征UUID
-    private static final UUID HEARTBEAT_CHARACTERISTIC_UUID = UUID.fromString("87654321-4321-4321-4321-CBA987654321");
+    private static final UUID HEARTBEAT_CHARACTERISTIC_UUID = UUID.fromString("0000FFE1-0000-1000-8000-123456789ABC");
     // 客户端特征配置描述符UUID (标准UUID)
     private static final UUID CLIENT_CHARACTERISTIC_CONFIG = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
 
@@ -160,26 +160,32 @@ public class BleServer {
             return;
         }
 
-        // 配置广播设置
+        // 配置广播设置 - 使用平衡模式提高兼容性
         AdvertiseSettings settings = new AdvertiseSettings.Builder()
-                .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY) // 低延迟模式，更快的连接
+                .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_BALANCED) // 平衡模式，提高兼容性
                 .setConnectable(true) // 保持可连接
                 .setTimeout(0) // 0表示一直广播
                 .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH) // 高发射功率
                 .build();
 
-        // 配置广播数据
+        // 配置广播数据 - 包含服务UUID和设备名称
         AdvertiseData advertiseData = new AdvertiseData.Builder()
                 .addServiceUuid(new ParcelUuid(HEARTBEAT_SERVICE_UUID))
-                // 可以添加设备名称，但会增加广播数据大小
-                // .setIncludeDeviceName(true)
+                .setIncludeDeviceName(true) // 包含设备名称，提高发现率
                 .build();
 
-        // 开始广播
-        bluetoothLeAdvertiser.startAdvertising(settings, advertiseData, null, advertiseCallback);
+        // 配置扫描响应数据 - 提供额外的设备信息
+        AdvertiseData scanResponseData = new AdvertiseData.Builder()
+                .addServiceUuid(new ParcelUuid(HEARTBEAT_SERVICE_UUID))
+                .setIncludeTxPowerLevel(true) // 包含发射功率信息
+                .build();
+
+        // 开始广播，包含扫描响应数据
+        bluetoothLeAdvertiser.startAdvertising(settings, advertiseData, scanResponseData, advertiseCallback);
         Log.i(TAG, "尝试启动BLE广播...");
         Log.d(TAG, "广播设置: " + settings.toString());
         Log.d(TAG, "广播数据: " + advertiseData.toString());
+        Log.d(TAG, "扫描响应数据: " + scanResponseData.toString());
     }
 
     /**
@@ -199,24 +205,67 @@ public class BleServer {
             return;
         }
 
-        // 更简单的广播配置，通常在数据过大时尝试
+        // 更保守的广播配置，提高兼容性
         AdvertiseSettings settings = new AdvertiseSettings.Builder()
-                .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
+                .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_POWER) // 低功耗模式，更稳定
                 .setConnectable(true) // 保持可连接
                 .setTimeout(0)
                 .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM) // 中等发射功率
                 .build();
 
-        // 固定广播数据（不包含扫描响应，只包含服务UUID）
+        // 最小化的广播数据，只包含服务UUID
         AdvertiseData advertiseData = new AdvertiseData.Builder()
                 .addServiceUuid(new ParcelUuid(HEARTBEAT_SERVICE_UUID))
                 .build();
 
-        bluetoothLeAdvertiser.startAdvertising(settings, advertiseData, null, advertiseCallback);
+        // 简单的扫描响应数据
+        AdvertiseData scanResponseData = new AdvertiseData.Builder()
+                .setIncludeDeviceName(true) // 在扫描响应中包含设备名称
+                .build();
+
+        bluetoothLeAdvertiser.startAdvertising(settings, advertiseData, scanResponseData, advertiseCallback);
         Log.i(TAG, "尝试启动BLE广播（备用方法）...");
         Log.d(TAG, "备用广播设置: " + settings.toString());
         Log.d(TAG, "备用广播数据: " + advertiseData.toString());
+        Log.d(TAG, "备用扫描响应数据: " + scanResponseData.toString());
         isUsingFallback = true;
+    }
+
+    /**
+     * 启动BLE广播（兼容性模式 - 针对老旧设备）
+     */
+    @SuppressLint("MissingPermission")
+    private void startAdvertisingCompatibility() {
+        BluetoothAdapter bluetoothAdapter = bluetoothManager.getAdapter();
+        if (bluetoothAdapter == null) {
+            Log.e(TAG, "BluetoothAdapter不可用，无法启动兼容性BLE广播.");
+            return;
+        }
+
+        bluetoothLeAdvertiser = bluetoothAdapter.getBluetoothLeAdvertiser();
+        if (bluetoothLeAdvertiser == null) {
+            Log.e(TAG, "BluetoothLeAdvertiser不可用，无法启动兼容性BLE广播.");
+            return;
+        }
+
+        // 最兼容的广播配置
+        AdvertiseSettings settings = new AdvertiseSettings.Builder()
+                .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_POWER) // 低功耗模式，最兼容
+                .setConnectable(true)
+                .setTimeout(0)
+                .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_LOW) // 低发射功率，减少干扰
+                .build();
+
+        // 只包含最基本的广播数据
+        AdvertiseData advertiseData = new AdvertiseData.Builder()
+                .addServiceUuid(new ParcelUuid(HEARTBEAT_SERVICE_UUID))
+                .build();
+
+        // 不包含扫描响应数据，减少复杂性
+        bluetoothLeAdvertiser.startAdvertising(settings, advertiseData, null, advertiseCallback);
+        Log.i(TAG, "尝试启动BLE广播（兼容性模式）...");
+        Log.d(TAG, "兼容性广播设置: " + settings.toString());
+        Log.d(TAG, "兼容性广播数据: " + advertiseData.toString());
     }
 
     /**
@@ -382,6 +431,7 @@ public class BleServer {
             isAdvertising = true;
             isUsingFallback = false; // 如果成功，重置备用标志
             Log.i(TAG, "BLE广播启动成功!");
+            Log.d(TAG, "实际广播设置: " + settingsInEffect.toString());
         }
 
         @Override
@@ -389,10 +439,14 @@ public class BleServer {
             super.onStartFailure(errorCode);
             isAdvertising = false;
             String errorMessage;
+            boolean shouldRetry = false;
+            
             switch (errorCode) {
                 case ADVERTISE_FAILED_ALREADY_STARTED:
                     errorMessage = "广播已启动.";
-                    break;
+                    Log.w(TAG, "广播已启动，无需重复启动.");
+                    return; // 直接返回，不报告失败
+                    
                 case ADVERTISE_FAILED_DATA_TOO_LARGE:
                     errorMessage = "广播数据太大.";
                     if (!isUsingFallback) {
@@ -400,23 +454,47 @@ public class BleServer {
                         startAdvertisingFallback();
                         return; // 尝试备用方法后直接返回，不报告失败
                     } else {
-                        errorMessage = "备用广播方法也失败，数据仍然太大.";
+                        Log.w(TAG, "备用广播方法也失败，尝试兼容性模式...");
+                        startAdvertisingCompatibility();
+                        return;
                     }
-                    break;
+                    
                 case ADVERTISE_FAILED_TOO_MANY_ADVERTISERS:
                     errorMessage = "广播器过多，系统资源不足.";
+                    shouldRetry = true;
                     break;
+                    
                 case ADVERTISE_FAILED_INTERNAL_ERROR:
                     errorMessage = "内部错误.";
+                    shouldRetry = true;
                     break;
+                    
                 case ADVERTISE_FAILED_FEATURE_UNSUPPORTED:
                     errorMessage = "设备不支持此广播功能.";
+                    Log.e(TAG, "设备不支持BLE广播功能，请检查设备兼容性.");
                     break;
+                    
                 default:
-                    errorMessage = "未知错误.";
+                    errorMessage = "未知错误 (错误码: " + errorCode + ").";
+                    shouldRetry = true;
                     break;
             }
-            Log.e(TAG, "BLE广播启动失败: " + errorMessage + " (错误码: " + errorCode + ")");
+            
+            Log.e(TAG, "BLE广播启动失败: " + errorMessage);
+            
+            // 如果应该重试，延迟后重试
+            if (shouldRetry && !isUsingFallback) {
+                Log.i(TAG, "将在3秒后重试广播...");
+                handler.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (isServerRunning && !isAdvertising) {
+                            Log.i(TAG, "重试启动BLE广播...");
+                            startAdvertising();
+                        }
+                    }
+                }, 3000);
+            }
         }
     };
 
@@ -572,4 +650,64 @@ public class BleServer {
             Log.i(TAG, "设备 " + device.getAddress() + " MTU 已改变为: " + mtu);
         }
     };
+
+    /**
+     * 获取当前广播状态信息
+     */
+    public String getAdvertisingStatus() {
+        StringBuilder status = new StringBuilder();
+        status.append("广播状态: ").append(isAdvertising ? "运行中" : "已停止").append("\n");
+        status.append("服务器状态: ").append(isServerRunning ? "运行中" : "已停止").append("\n");
+        status.append("使用备用模式: ").append(isUsingFallback ? "是" : "否").append("\n");
+        status.append("连接设备数: ").append(connectedDevices.size()).append("\n");
+        status.append("订阅设备数: ").append(subscribedDevices.size()).append("\n");
+        status.append("心跳计数: ").append(heartbeatCounter).append("\n");
+        status.append("服务UUID: ").append(HEARTBEAT_SERVICE_UUID.toString()).append("\n");
+        status.append("特征UUID: ").append(HEARTBEAT_CHARACTERISTIC_UUID.toString());
+        return status.toString();
+    }
+
+    /**
+     * 获取广播诊断信息和建议
+     */
+    public String getBroadcastDiagnostics() {
+        StringBuilder diagnostics = new StringBuilder();
+        diagnostics.append("=== BLE广播诊断信息 ===\n");
+        
+        // 基本状态
+        diagnostics.append("广播状态: ").append(isAdvertising ? "✅ 运行中" : "❌ 已停止").append("\n");
+        diagnostics.append("服务器状态: ").append(isServerRunning ? "✅ 运行中" : "❌ 已停止").append("\n");
+        diagnostics.append("使用备用模式: ").append(isUsingFallback ? "是" : "否").append("\n");
+        
+        // 连接信息
+        diagnostics.append("连接设备数: ").append(connectedDevices.size()).append("\n");
+        diagnostics.append("订阅设备数: ").append(subscribedDevices.size()).append("\n");
+        
+        // UUID信息
+        diagnostics.append("服务UUID: ").append(HEARTBEAT_SERVICE_UUID.toString()).append("\n");
+        diagnostics.append("特征UUID: ").append(HEARTBEAT_CHARACTERISTIC_UUID.toString()).append("\n");
+        
+        // 建议
+        diagnostics.append("\n=== 设备搜不到的可能原因 ===\n");
+        if (!isAdvertising) {
+            diagnostics.append("❌ 广播未启动，请检查权限和蓝牙状态\n");
+        }
+        if (connectedDevices.size() >= 7) {
+            diagnostics.append("⚠️ 连接设备过多，可能影响新设备发现\n");
+        }
+        diagnostics.append("1. 设备距离过远或存在物理障碍\n");
+        diagnostics.append("2. 扫描设备不支持当前广播模式\n");
+        diagnostics.append("3. 蓝牙权限不足\n");
+        diagnostics.append("4. 设备蓝牙版本不兼容\n");
+        diagnostics.append("5. 系统资源不足\n");
+        
+        diagnostics.append("\n=== 解决建议 ===\n");
+        diagnostics.append("1. 确保设备在有效范围内（通常10米内）\n");
+        diagnostics.append("2. 重启蓝牙或重新启动广播\n");
+        diagnostics.append("3. 检查扫描设备的蓝牙版本（建议4.0+）\n");
+        diagnostics.append("4. 尝试不同的扫描应用\n");
+        diagnostics.append("5. 检查设备是否支持BLE广播\n");
+        
+        return diagnostics.toString();
+    }
 }
