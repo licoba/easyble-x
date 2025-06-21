@@ -21,11 +21,12 @@ import android.os.Bundle
 import android.util.Log
 import android.view.MenuItem
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.kongzue.dialogx.dialogs.PopNotification
+import com.permissionx.guolindev.PermissionX
 import com.wandersnail.bledemo.databinding.ActivityAncsBinding
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -43,9 +44,18 @@ class AncsActivity : AppCompatActivity() {
     private var bleServer: BleServer? = null
     private var serverStatusJob: Job? = null
     private var scanTimeoutJob: Job? = null
-    private val triedDevices: MutableSet<String> = HashSet()
     private var isServiceDiscovered = false
     private val ancsUtil = ANCSUtil()
+
+    private val enableBluetoothLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            connectedAncsDevice
+        } else {
+            Toast.makeText(this, "请开启蓝牙以使用ANCS功能", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     private fun logAndUpdateUI(level: Int, message: String) {
         when (level) {
@@ -114,20 +124,22 @@ class AncsActivity : AppCompatActivity() {
                 } else {
                     logAndUpdateUI(Log.ERROR, "未找到ANCS服务")
                     val deviceAddress = gatt.device.address
-                    triedDevices.add(deviceAddress)
                     logAndUpdateUI("设备 $deviceAddress 不支持ANCS服务，已记录")
                     gatt.close()
                 }
             } else {
                 logAndUpdateUI(Log.ERROR, "服务发现失败: $status")
                 val deviceAddress = gatt.device.address
-                triedDevices.add(deviceAddress)
                 logAndUpdateUI("设备 $deviceAddress 服务发现失败，已记录")
                 gatt.close()
             }
         }
 
-        override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
+        override fun onDescriptorWrite(
+            gatt: BluetoothGatt,
+            descriptor: BluetoothGattDescriptor,
+            status: Int
+        ) {
             logAndUpdateUI("描述符写入: status=$status")
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 Log.i(TAG, "描述符写入成功")
@@ -136,7 +148,11 @@ class AncsActivity : AppCompatActivity() {
             }
         }
 
-        override fun onCharacteristicWrite(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+        override fun onCharacteristicWrite(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            status: Int
+        ) {
             logAndUpdateUI("特征值写入: status=$status, UUID=${characteristic.uuid}")
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 logAndUpdateUI("特征值写入成功")
@@ -145,16 +161,19 @@ class AncsActivity : AppCompatActivity() {
             }
         }
 
-        override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
+        override fun onCharacteristicChanged(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic
+        ) {
             if (characteristic.uuid == ANCSUtil.NOTIFICATION_SOURCE_UUID) {
                 val data = characteristic.value
-                if (data != null && data.size > 0) {
+                if (data != null && data.isNotEmpty()) {
                     logAndUpdateUI("收到ANCS通知数据，长度: ${data.size}")
                     parseAncsNotification(data)
                 }
             } else if (characteristic.uuid == ANCSUtil.DATA_SOURCE_UUID) {
                 val data = characteristic.value
-                if (data != null && data.size > 0) {
+                if (data != null && data.isNotEmpty()) {
                     logAndUpdateUI("收到通知详细内容，长度: ${data.size}")
                     parseNotificationDetails(data)
                 }
@@ -180,14 +199,8 @@ class AncsActivity : AppCompatActivity() {
 
             logAndUpdateUI("发现设备: $deviceName ($deviceAddress), RSSI: $rssi")
 
-            if (triedDevices.contains(deviceAddress)) {
-                logAndUpdateUI("设备 $deviceAddress 已尝试过，跳过")
-                return
-            }
-
             if (deviceName != null && deviceName.lowercase(Locale.getDefault()).contains("ancs")) {
                 Log.i(TAG, "找到名称包含ANCS的设备: $deviceName ($deviceAddress)")
-                triedDevices.add(deviceAddress)
                 stopScan()
                 connectToDevice(device)
             }
@@ -240,7 +253,7 @@ class AncsActivity : AppCompatActivity() {
         }
 
         binding.btnConnect.setOnClickListener {
-            val macAddress = binding.etMacAddress.text.toString().trim { it <= ' ' }
+            val macAddress = binding.etMacAddress.text.toString().trim()
             if (macAddress.isEmpty()) {
                 Toast.makeText(this, "请输入MAC地址", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
@@ -284,16 +297,57 @@ class AncsActivity : AppCompatActivity() {
         bluetoothAdapter = bluetoothManager.adapter
 
         if (bluetoothAdapter == null) {
-            Toast.makeText(this, "Bluetooth is not supported on this device", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Bluetooth is not supported on this device", Toast.LENGTH_LONG)
+                .show()
             finish()
             return
         }
 
-        if (checkBluetoothPermissions()) {
-            checkBluetoothEnabled()
+        // 使用 PermissionX 检查和请求权限
+        checkAndRequestPermissions()
+    }
+
+    /**
+     * 使用 PermissionX 检查和请求蓝牙权限
+     */
+    private fun checkAndRequestPermissions() {
+        val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            arrayOf(
+                Manifest.permission.BLUETOOTH_SCAN,
+                Manifest.permission.BLUETOOTH_CONNECT,
+                Manifest.permission.BLUETOOTH_ADVERTISE
+            )
         } else {
-            requestBluetoothPermissions()
+            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
         }
+
+        PermissionX.init(this)
+            .permissions(*permissions)
+            .onExplainRequestReason { scope, deniedList ->
+                val message = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    "ANCS功能需要蓝牙扫描、连接和广播权限才能正常工作"
+                } else {
+                    "ANCS功能需要位置权限才能扫描蓝牙设备"
+                }
+                scope.showRequestReasonDialog(deniedList, message, "确定", "取消")
+            }
+            .onForwardToSettings { scope, deniedList ->
+                scope.showForwardToSettingsDialog(
+                    deniedList,
+                    "您需要在设置中手动允许必要的权限才能使用ANCS功能",
+                    "去设置",
+                    "取消"
+                )
+            }
+            .request { allGranted, grantedList, deniedList ->
+                if (allGranted) {
+                    logAndUpdateUI("所有权限已授予")
+                    checkBluetoothEnabled()
+                } else {
+                    logAndUpdateUI("以下权限被拒绝: $deniedList")
+                    Toast.makeText(this, "权限被拒绝，无法使用ANCS功能", Toast.LENGTH_SHORT).show()
+                }
+            }
     }
 
     @get:SuppressLint("MissingPermission")
@@ -317,8 +371,6 @@ class AncsActivity : AppCompatActivity() {
     private fun startScan() {
         if (!isScanning) {
             logAndUpdateUI("正在扫描BLE设备...")
-            triedDevices.clear()
-            logAndUpdateUI("清空已尝试设备记录，重新开始扫描")
 
             scanTimeoutJob = lifecycleScope.launch {
                 delay(SCAN_PERIOD)
@@ -398,13 +450,15 @@ class AncsActivity : AppCompatActivity() {
     @SuppressLint("MissingPermission")
     private fun enableNotificationSource() {
         if (notificationSourceChar != null) {
-            val success = bluetoothGatt!!.setCharacteristicNotification(notificationSourceChar, true)
+            val success =
+                bluetoothGatt!!.setCharacteristicNotification(notificationSourceChar, true)
             if (!success) {
                 logAndUpdateUI(Log.ERROR, "启用Notification Source通知失败")
                 return
             }
 
-            val descriptor = notificationSourceChar!!.getDescriptor(ANCSUtil.CLIENT_CHARACTERISTIC_CONFIG)
+            val descriptor =
+                notificationSourceChar!!.getDescriptor(ANCSUtil.CLIENT_CHARACTERISTIC_CONFIG)
             if (descriptor != null) {
                 descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
                 val writeSuccess = bluetoothGatt!!.writeDescriptor(descriptor)
@@ -422,11 +476,16 @@ class AncsActivity : AppCompatActivity() {
         val notificationInfo = ancsUtil.parseAncsNotification(data)
         if (notificationInfo != null) {
             logAndUpdateUI("解析通知数据: eventId=${notificationInfo.eventId}, flags=${notificationInfo.eventFlags}, categoryId=${notificationInfo.categoryId}, uid=${notificationInfo.notificationUid}")
-            
-            val notification = "通知ID: ${notificationInfo.notificationUid}\n类型: ${notificationInfo.eventType}\n分类: ${notificationInfo.category}\n"
+
+            val notification =
+                "通知ID: ${notificationInfo.notificationUid}\n类型: ${notificationInfo.eventType}\n分类: ${notificationInfo.category}\n"
             logAndUpdateUI(notification)
 
-            if (ancsUtil.isNewSocialNotification(notificationInfo.eventId, notificationInfo.categoryId)) {
+            if (ancsUtil.isNewSocialNotification(
+                    notificationInfo.eventId,
+                    notificationInfo.categoryId
+                )
+            ) {
                 requestNotificationDetails(notificationInfo.notificationUid)
             }
         }
@@ -439,10 +498,8 @@ class AncsActivity : AppCompatActivity() {
             val command = ancsUtil.buildGetNotificationAttributesCommand(notificationUid)
             controlPoint.setValue(command)
             val success = bluetoothGatt!!.writeCharacteristic(controlPoint)
-            
             val commandHex = command.joinToString(" ") { String.format("%02X", it) }
-            logAndUpdateUI("发送获取通知详细内容的请求: $success, command: $commandHex")
-            
+            Log.d(TAG, "发送获取通知详细内容的请求: $success, command: $commandHex")
             if (!success) {
                 logAndUpdateUI(Log.ERROR, "写入特征值失败")
             }
@@ -457,7 +514,7 @@ class AncsActivity : AppCompatActivity() {
 
             val allDetails = StringBuilder()
             allDetails.append("Notification (UID: ${details.notificationUid}):\n")
-            
+
             details.attributes.forEach { (name, value) ->
                 val detail = "  - $name: $value"
                 logAndUpdateUI(detail)
@@ -465,7 +522,8 @@ class AncsActivity : AppCompatActivity() {
             }
 
             logAndUpdateUI(allDetails.toString())
-            val msg = "ANCS消息\n应用: ${details.appIdentifier}\n标题: ${details.title}\n内容: ${details.message}"
+            val msg =
+                "ANCS消息\n应用: ${details.appIdentifier}\n标题: ${details.title}\n内容: ${details.message}"
             PopNotification.show(msg)
         }
     }
@@ -523,39 +581,6 @@ class AncsActivity : AppCompatActivity() {
         }
     }
 
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQUEST_ENABLE_BT) {
-            if (resultCode == RESULT_OK) {
-                connectedAncsDevice
-            } else {
-                Toast.makeText(this, "请开启蓝牙以使用ANCS功能", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<String>,
-        grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == REQUEST_BLUETOOTH_PERMISSIONS) {
-            var allGranted = true
-            for (result in grantResults) {
-                if (result != PackageManager.PERMISSION_GRANTED) {
-                    allGranted = false
-                    break
-                }
-            }
-            if (allGranted) {
-                checkBluetoothEnabled()
-            } else {
-                Toast.makeText(this, "蓝牙权限被拒绝，无法使用ANCS功能", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
     private fun checkBluetoothEnabled() {
         if (!bluetoothAdapter!!.isEnabled) {
             val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
@@ -566,56 +591,14 @@ class AncsActivity : AppCompatActivity() {
             ) {
                 return
             }
-            startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT)
+            enableBluetoothLauncher.launch(enableBtIntent)
         } else {
             connectedAncsDevice
         }
     }
 
-    private fun requestBluetoothPermissions() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            ActivityCompat.requestPermissions(
-                this,
-                arrayOf(
-                    Manifest.permission.BLUETOOTH_SCAN,
-                    Manifest.permission.BLUETOOTH_CONNECT,
-                    Manifest.permission.BLUETOOTH_ADVERTISE
-                ),
-                REQUEST_BLUETOOTH_PERMISSIONS
-            )
-        } else {
-            ActivityCompat.requestPermissions(
-                this,
-                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION),
-                REQUEST_BLUETOOTH_PERMISSIONS
-            )
-        }
-    }
-
-    private fun checkBluetoothPermissions(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.BLUETOOTH_SCAN
-            ) == PackageManager.PERMISSION_GRANTED && ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.BLUETOOTH_CONNECT
-            ) == PackageManager.PERMISSION_GRANTED && ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.BLUETOOTH_ADVERTISE
-            ) == PackageManager.PERMISSION_GRANTED
-        } else {
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-        }
-    }
-
     companion object {
         private const val TAG = "AncsActivity"
-        private const val REQUEST_BLUETOOTH_PERMISSIONS = 1001
-        private const val REQUEST_ENABLE_BT = 1002
         private const val SCAN_PERIOD: Long = 10000
     }
 }
