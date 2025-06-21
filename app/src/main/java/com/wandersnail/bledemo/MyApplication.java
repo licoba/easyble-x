@@ -3,6 +3,8 @@ package com.wandersnail.bledemo;
 import android.app.Application;
 import android.bluetooth.le.ScanSettings;
 
+import com.kongzue.dialogx.DialogX;
+
 import cn.wandersnail.ble.EasyBLE;
 import cn.wandersnail.ble.ScanConfiguration;
 import cn.wandersnail.ble.ScannerType;
@@ -35,6 +37,8 @@ public class MyApplication extends Application {
                 .build();
         ble.setLogEnabled(true);//开启日志打印
         ble.initialize(this);
+        DialogX.init(this);
+
     }
     
     public static MyApplication getInstance() {

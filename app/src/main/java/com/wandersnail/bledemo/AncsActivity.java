@@ -16,8 +16,6 @@ import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothProfile;
 import android.bluetooth.le.BluetoothLeScanner;
 import android.bluetooth.le.ScanCallback;
-import android.bluetooth.le.ScanFilter;
-import android.bluetooth.le.ScanRecord;
 import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanSettings;
 import android.content.Context;
@@ -42,8 +40,8 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
 import com.blankj.utilcode.util.ToastUtils;
+import com.kongzue.dialogx.dialogs.PopNotification;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -77,6 +75,7 @@ public class AncsActivity extends AppCompatActivity {
     private static final byte NOTIFICATION_ATTRIBUTE_POSITIVE_ACTION_LABEL = 0x06;
     private static final byte NOTIFICATION_ATTRIBUTE_NEGATIVE_ACTION_LABEL = 0x07;
     private static final long SCAN_PERIOD = 10000; // 扫描10秒
+    private static final long CONNECTION_TIMEOUT = 3000; // 2秒超时
     private BluetoothAdapter bluetoothAdapter;
     private BluetoothGatt bluetoothGatt;
     private LogTextView tvStatus;
@@ -95,6 +94,11 @@ public class AncsActivity extends AppCompatActivity {
     private BluetoothGattCharacteristic dataSourceChar;
     private BleServer bleServer;
     private Runnable serverStatusUpdater;
+    
+    // 添加连接超时相关变量
+    private Runnable connectionTimeoutRunnable;
+    private java.util.Set<String> triedDevices = new java.util.HashSet<>(); // 记录已尝试过的设备
+    private boolean isServiceDiscovered = false; // 标记是否已发现服务
 
     private final BluetoothGattCallback gattCallback = new BluetoothGattCallback() {
         @SuppressLint("MissingPermission")
@@ -107,6 +111,13 @@ public class AncsActivity extends AppCompatActivity {
                     runOnUiThread(() -> {
                         tvStatus.appendLog("已连接到设备，正在发现服务...");
                     });
+                    
+                    // 重置服务发现标记
+                    isServiceDiscovered = false;
+                    
+                    // 启动连接超时定时器
+                    startConnectionTimeout();
+                    
                     // 请求更大的MTU值
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                         gatt.requestMtu(512);
@@ -119,6 +130,10 @@ public class AncsActivity extends AppCompatActivity {
                     runOnUiThread(() -> {
                         tvStatus.appendLog("设备已断开连接");
                     });
+                    
+                    // 停止超时定时器
+                    stopConnectionTimeout();
+                    
                     gatt.close();
                 }
             } else {
@@ -126,6 +141,10 @@ public class AncsActivity extends AppCompatActivity {
                 runOnUiThread(() -> {
                     tvStatus.appendLog("连接失败: " + status);
                 });
+                
+                // 停止超时定时器
+                stopConnectionTimeout();
+                
                 gatt.close();
             }
         }
@@ -141,6 +160,10 @@ public class AncsActivity extends AppCompatActivity {
                     runOnUiThread(() -> {
                         tvStatus.appendLog("发现ANCS服务");
                     });
+                    
+                    // 标记服务已发现，停止超时定时器
+                    isServiceDiscovered = true;
+                    stopConnectionTimeout();
 
                     // 获取通知源特征
                     notificationSourceChar = ancsService.getCharacteristic(NOTIFICATION_SOURCE_UUID);
@@ -178,6 +201,12 @@ public class AncsActivity extends AppCompatActivity {
                     runOnUiThread(() -> {
                         tvStatus.appendLog("未找到ANCS服务");
                     });
+                    
+                    // 记录设备地址并断开连接
+                    String deviceAddress = gatt.getDevice().getAddress();
+                    triedDevices.add(deviceAddress);
+                    Log.d(TAG, "设备 " + deviceAddress + " 不支持ANCS服务，已记录");
+                    
                     gatt.close();
                 }
             } else {
@@ -185,6 +214,12 @@ public class AncsActivity extends AppCompatActivity {
                 runOnUiThread(() -> {
                     tvStatus.appendLog("服务发现失败: " + status);
                 });
+                
+                // 记录设备地址并断开连接
+                String deviceAddress = gatt.getDevice().getAddress();
+                triedDevices.add(deviceAddress);
+                Log.d(TAG, "设备 " + deviceAddress + " 服务发现失败，已记录");
+                
                 gatt.close();
             }
         }
@@ -259,20 +294,23 @@ public class AncsActivity extends AppCompatActivity {
             BluetoothDevice device = result.getDevice();
             int rssi = result.getRssi();
             String deviceName = device.getName();
-            if(result.getRssi() < -50) return;
-            Log.d(TAG, "发现设备: " + deviceName + " (" + device.getAddress() + "), RSSI: " + rssi);
-            // 检查是否有指定的MAC地址
-//            String targetMac = etMacAddress.getText().toString().trim();
-//            if (!targetMac.isEmpty()) {
-//                // 如果输入框有MAC地址，只连接匹配的设备
-//                if (!device.getAddress().startsWith(targetMac)) {
-//                    return;
-//                }
-//            }
+            String deviceAddress = device.getAddress();
+            
+//            if(result.getRssi() < -40) return;
+            Log.d(TAG, "发现设备: " + deviceName + " (" + deviceAddress + "), RSSI: " + rssi);
+            
+            // 检查是否已经尝试过这个设备
+            if (triedDevices.contains(deviceAddress)) {
+                Log.d(TAG, "设备 " + deviceAddress + " 已尝试过，跳过");
+                return;
+            }
+            
 
-            // 检查设备是否支持ANCS服务
-            if (isAncsDevice(result.getScanRecord()) && deviceName != null && deviceName.contains("iPhone")) {
-                Log.i(TAG, "找到支持ANCS的设备: " + deviceName + " (" + device.getAddress() + ")");
+            // 检查设备名称是否包含"ancs"（不区分大小写）
+            if (deviceName != null && deviceName.toLowerCase().contains("ancs")) {
+                Log.i(TAG, "找到名称包含ANCS的设备: " + deviceName + " (" + deviceAddress + ")");
+                // 记录设备地址，防止重复尝试
+                triedDevices.add(deviceAddress);
                 stopScan();
                 connectToDevice(device);
             }
@@ -288,29 +326,6 @@ public class AncsActivity extends AppCompatActivity {
             btnScan.setText("扫描");
         }
     };
-
-    private boolean isAncsDevice(ScanRecord scanRecord) {
-        if (scanRecord == null) return false;
-        // 检查是否是Apple设备
-        byte[] manufacturerData = scanRecord.getManufacturerSpecificData(0x004C); // Apple's company identifier
-        if (manufacturerData == null) {
-            Log.d(TAG, "不是Apple设备");
-            return false;
-        }
-        if(bytesToHex(scanRecord.getBytes()).replace(" ","").startsWith("02011A")){
-            Log.d(TAG, "是Apple的ANCS设备");
-            return true;
-        }
-        return false;
-    }
-    
-    private String bytesToHex(byte[] bytes) {
-        StringBuilder sb = new StringBuilder();
-        for (byte b : bytes) {
-            sb.append(String.format("%02X ", b));
-        }
-        return sb.toString();
-    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -456,6 +471,10 @@ public class AncsActivity extends AppCompatActivity {
                 tvStatus.appendLog("正在扫描BLE设备...");
             });
 
+            // 清空已尝试设备的记录，重新开始尝试
+            triedDevices.clear();
+            Log.d(TAG, "清空已尝试设备记录，重新开始扫描");
+
             // 设置扫描超时
             handler.postDelayed(this::stopScan, SCAN_PERIOD);
 
@@ -472,15 +491,8 @@ public class AncsActivity extends AppCompatActivity {
                         .setMatchMode(ScanSettings.MATCH_MODE_AGGRESSIVE) // 匹配所有广播
                         .build();
                 
-                // 创建扫描过滤器
-                List<ScanFilter> filters = new ArrayList<>();
-                // 添加苹果厂商数据过滤器 (Apple's company identifier: 0x004C)
-                ScanFilter appleManufacturerFilter = new ScanFilter.Builder()
-                        .setManufacturerData(0x004C, new byte[]{}) // Pass an empty byte array for data and dataMask to match any Apple manufacturer data
-                        .build();
-                filters.add(appleManufacturerFilter);
-                
-                bluetoothLeScanner.startScan(filters, settings, scanCallback);
+                // 不设置过滤器，扫描所有设备，在回调中根据名称过滤
+                bluetoothLeScanner.startScan(null, settings, scanCallback);
             } else {
                 Log.e(TAG, "无法获取BluetoothLeScanner");
                 runOnUiThread(() -> {
@@ -667,6 +679,8 @@ public class AncsActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         stopScan();
+        // 停止连接超时定时器
+        stopConnectionTimeout();
         if (bluetoothGatt != null) {
             bluetoothGatt.close();
         }
@@ -769,7 +783,7 @@ public class AncsActivity extends AppCompatActivity {
             ActivityCompat.requestPermissions(
                     this,
                     new String[]{
-                            Manifest.permission.BLUETOOTH_SCAN, 
+                            Manifest.permission.BLUETOOTH_SCAN,
                             Manifest.permission.BLUETOOTH_CONNECT,
                             Manifest.permission.BLUETOOTH_ADVERTISE
                     },
@@ -829,7 +843,9 @@ public class AncsActivity extends AppCompatActivity {
 
                 controlPoint.setValue(command);
                 boolean success = bluetoothGatt.writeCharacteristic(controlPoint);
-                Log.d(TAG, "发送获取通知详细内容的请求: " + success + ", command:" +bytesToHex(command));
+                Log.d(TAG, "发送获取通知详细内容的请求: " + success + ", command:" + String.format("%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
+                        command[0], command[1], command[2], command[3], command[4], command[5], command[6], command[7],
+                        command[8], command[9], command[10], command[11], command[12], command[13]));
                 if (!success) {
                     Log.e(TAG, "写入特征值失败");
                     runOnUiThread(() -> {
@@ -918,12 +934,10 @@ public class AncsActivity extends AppCompatActivity {
 
         runOnUiThread(() -> {
             tvNotifications.appendLog(allDetails.toString());
-
-            // Prepare the Toast message
-            String toastMessage = String.format("应用: %s\n标题: %s\n内容: %s",
+            String msg = "ANCS消息\n" + String.format("应用: %s\n标题: %s\n内容: %s",
                     finalAppIdentifier, finalTitle, finalMessage);
-            // Display the Toast
-            ToastUtils.showShort(toastMessage);
+            PopNotification.show(msg);
+
         });
     }
 
@@ -971,5 +985,60 @@ public class AncsActivity extends AppCompatActivity {
             return ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED;
         }
         return true; // Android 12以下版本不需要此权限
+    }
+    
+    // 启动连接超时定时器
+    private void startConnectionTimeout() {
+        stopConnectionTimeout(); // 先停止之前的定时器
+        connectionTimeoutRunnable = new Runnable() {
+            @Override
+            public void run() {
+                handleConnectionTimeout();
+            }
+        };
+        handler.postDelayed(connectionTimeoutRunnable, CONNECTION_TIMEOUT);
+        Log.d(TAG, "启动连接超时定时器: " + CONNECTION_TIMEOUT + "ms");
+    }
+    
+    // 停止连接超时定时器
+    private void stopConnectionTimeout() {
+        if (connectionTimeoutRunnable != null) {
+            handler.removeCallbacks(connectionTimeoutRunnable);
+            connectionTimeoutRunnable = null;
+            Log.d(TAG, "停止连接超时定时器");
+        }
+    }
+    
+    // 处理连接超时
+    @SuppressLint("MissingPermission")
+    private void handleConnectionTimeout() {
+        if (!isServiceDiscovered && bluetoothGatt != null) {
+            String deviceAddress = bluetoothGatt.getDevice().getAddress();
+            Log.w(TAG, "连接超时，设备 " + deviceAddress + " 在 " + CONNECTION_TIMEOUT + "ms 内未发现ANCS服务");
+            
+            runOnUiThread(() -> {
+                tvStatus.appendLog("连接超时，设备 " + deviceAddress + " 未发现ANCS服务");
+            });
+            
+            // 记录设备地址
+            triedDevices.add(deviceAddress);
+            
+            // 断开连接
+            bluetoothGatt.disconnect();
+            bluetoothGatt.close();
+            bluetoothGatt = null;
+            
+            // 继续扫描寻找下一个设备
+            runOnUiThread(() -> {
+                tvStatus.appendLog("继续扫描寻找下一个ANCS设备...");
+            });
+            
+            // 延迟一秒后重新开始扫描
+            handler.postDelayed(() -> {
+                if (!isScanning) {
+                    startScan();
+                }
+            }, 1000);
+        }
     }
 } 

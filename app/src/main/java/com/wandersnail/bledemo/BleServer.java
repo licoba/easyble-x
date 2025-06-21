@@ -26,17 +26,16 @@ import java.util.List;
 import java.util.UUID;
 
 @SuppressLint("MissingPermission")
-
 public class BleServer {
     private static final String TAG = "BleServer";
-    
-    // 自定义服务UUID
+
+    // 使用更标准的UUID格式，便于识别
     private static final UUID HEARTBEAT_SERVICE_UUID = UUID.fromString("12345678-1234-1234-1234-123456789ABC");
     // 心跳特征UUID
     private static final UUID HEARTBEAT_CHARACTERISTIC_UUID = UUID.fromString("87654321-4321-4321-4321-CBA987654321");
-    // 客户端特征配置描述符UUID
+    // 客户端特征配置描述符UUID (标准UUID)
     private static final UUID CLIENT_CHARACTERISTIC_CONFIG = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
-    
+
     private Context context;
     private BluetoothManager bluetoothManager;
     private BluetoothGattServer gattServer;
@@ -49,6 +48,7 @@ public class BleServer {
     private boolean isUsingFallback = false;
     private int heartbeatCounter = 0;
     private List<android.bluetooth.BluetoothDevice> connectedDevices = new ArrayList<>();
+    private List<android.bluetooth.BluetoothDevice> subscribedDevices = new ArrayList<>();
 
     // 心跳发送间隔（毫秒）
     private static final long HEARTBEAT_INTERVAL = 1000; // 1秒
@@ -65,26 +65,25 @@ public class BleServer {
     @SuppressLint("MissingPermission")
     public boolean startServer() {
         if (isServerRunning) {
-            Log.w(TAG, "服务器已在运行");
+            Log.w(TAG, "BLE服务器已在运行.");
             return true;
         }
 
         if (bluetoothManager == null) {
-            Log.e(TAG, "BluetoothManager不可用");
+            Log.e(TAG, "BluetoothManager不可用，无法启动BLE服务器.");
             return false;
         }
 
-        // 设置设备名称为BBB
         BluetoothAdapter bluetoothAdapter = bluetoothManager.getAdapter();
-        if (bluetoothAdapter != null) {
-            bluetoothAdapter.setName("BBB");
-            Log.i(TAG, "设备名称已设置为: BBB");
+        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) {
+            Log.e(TAG, "蓝牙适配器不可用或未启用，无法启动BLE服务器.");
+            return false;
         }
 
         // 创建GATT服务器
         gattServer = bluetoothManager.openGattServer(context, gattServerCallback);
         if (gattServer == null) {
-            Log.e(TAG, "无法创建GATT服务器");
+            Log.e(TAG, "无法创建GATT服务器.");
             return false;
         }
 
@@ -95,14 +94,15 @@ public class BleServer {
         );
 
         // 创建心跳特征
+        // 增加 PROPERTY_READ 和 PERMISSION_READ，允许客户端读取当前心跳值
         heartbeatCharacteristic = new BluetoothGattCharacteristic(
                 HEARTBEAT_CHARACTERISTIC_UUID,
-                BluetoothGattCharacteristic.PROPERTY_READ |
-                BluetoothGattCharacteristic.PROPERTY_NOTIFY,
-                BluetoothGattCharacteristic.PERMISSION_READ
+                BluetoothGattCharacteristic.PROPERTY_NOTIFY | BluetoothGattCharacteristic.PROPERTY_READ, // 允许通知和读取
+                BluetoothGattCharacteristic.PERMISSION_READ // 允许读取权限
         );
 
         // 添加客户端特征配置描述符
+        // 允许读写权限，以便客户端启用/禁用通知
         BluetoothGattDescriptor descriptor = new BluetoothGattDescriptor(
                 CLIENT_CHARACTERISTIC_CONFIG,
                 BluetoothGattDescriptor.PERMISSION_READ | BluetoothGattDescriptor.PERMISSION_WRITE
@@ -116,7 +116,9 @@ public class BleServer {
         boolean success = gattServer.addService(heartbeatService);
         if (success) {
             isServerRunning = true;
-            Log.i(TAG, "BLE服务器启动成功");
+            Log.i(TAG, "BLE服务器启动成功.");
+            Log.i(TAG, "服务UUID: " + HEARTBEAT_SERVICE_UUID.toString());
+            Log.i(TAG, "特征UUID: " + HEARTBEAT_CHARACTERISTIC_UUID.toString());
 
             // 启动BLE广播
             startAdvertising();
@@ -125,7 +127,7 @@ public class BleServer {
             startHeartbeat();
             return true;
         } else {
-            Log.e(TAG, "添加服务失败");
+            Log.e(TAG, "添加服务失败，关闭GATT服务器.");
             gattServer.close();
             gattServer = null;
             return false;
@@ -141,77 +143,79 @@ public class BleServer {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (context.checkSelfPermission(android.Manifest.permission.BLUETOOTH_ADVERTISE)
                     != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                Log.e(TAG, "缺少BLUETOOTH_ADVERTISE权限，无法启动广播");
+                Log.e(TAG, "缺少BLUETOOTH_ADVERTISE权限，无法启动BLE广播.");
                 return;
             }
         }
 
         BluetoothAdapter bluetoothAdapter = bluetoothManager.getAdapter();
         if (bluetoothAdapter == null) {
-            Log.e(TAG, "BluetoothAdapter不可用");
+            Log.e(TAG, "BluetoothAdapter不可用，无法启动BLE广播.");
             return;
         }
 
         bluetoothLeAdvertiser = bluetoothAdapter.getBluetoothLeAdvertiser();
         if (bluetoothLeAdvertiser == null) {
-            Log.e(TAG, "BluetoothLeAdvertiser不可用");
+            Log.e(TAG, "BluetoothLeAdvertiser不可用，您的设备可能不支持BLE广播.");
             return;
         }
 
         // 配置广播设置
         AdvertiseSettings settings = new AdvertiseSettings.Builder()
-                .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_BALANCED)
+                .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY) // 低延迟模式，更快的连接
                 .setConnectable(true) // 保持可连接
                 .setTimeout(0) // 0表示一直广播
-                .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
+                .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH) // 高发射功率
                 .build();
 
-        // 配置广播数据（最简化版本，只包含服务UUID）
+        // 配置广播数据
         AdvertiseData advertiseData = new AdvertiseData.Builder()
-                .addServiceUuid(new ParcelUuid(HEARTBEAT_SERVICE_UUID)) // 只包含服务UUID
-                .setIncludeDeviceName(true) // Add this line
+                .addServiceUuid(new ParcelUuid(HEARTBEAT_SERVICE_UUID))
+                // 可以添加设备名称，但会增加广播数据大小
+                // .setIncludeDeviceName(true)
                 .build();
 
-        // 开始广播（不使用扫描响应）
+        // 开始广播
         bluetoothLeAdvertiser.startAdvertising(settings, advertiseData, null, advertiseCallback);
-        Log.i(TAG, "开始BLE广播");
+        Log.i(TAG, "尝试启动BLE广播...");
         Log.d(TAG, "广播设置: " + settings.toString());
         Log.d(TAG, "广播数据: " + advertiseData.toString());
     }
 
     /**
-     * 启动BLE广播（备用方法）
+     * 启动BLE广播（备用方法 - 针对数据过大或某些兼容性问题）
      */
     @SuppressLint("MissingPermission")
     private void startAdvertisingFallback() {
         BluetoothAdapter bluetoothAdapter = bluetoothManager.getAdapter();
         if (bluetoothAdapter == null) {
-            Log.e(TAG, "BluetoothAdapter不可用");
+            Log.e(TAG, "BluetoothAdapter不可用，无法启动备用BLE广播.");
             return;
         }
 
         bluetoothLeAdvertiser = bluetoothAdapter.getBluetoothLeAdvertiser();
         if (bluetoothLeAdvertiser == null) {
-            Log.e(TAG, "BluetoothLeAdvertiser不可用");
+            Log.e(TAG, "BluetoothLeAdvertiser不可用，无法启动备用BLE广播.");
             return;
         }
 
-        // 最简单的广播配置
+        // 更简单的广播配置，通常在数据过大时尝试
         AdvertiseSettings settings = new AdvertiseSettings.Builder()
                 .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
                 .setConnectable(true) // 保持可连接
                 .setTimeout(0)
-                .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
+                .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM) // 中等发射功率
                 .build();
 
-        // 固定广播数据（无扫描响应）
+        // 固定广播数据（不包含扫描响应，只包含服务UUID）
         AdvertiseData advertiseData = new AdvertiseData.Builder()
-                .setIncludeDeviceName(true)
                 .addServiceUuid(new ParcelUuid(HEARTBEAT_SERVICE_UUID))
                 .build();
 
         bluetoothLeAdvertiser.startAdvertising(settings, advertiseData, null, advertiseCallback);
-        Log.i(TAG, "开始BLE广播（备用方法）");
+        Log.i(TAG, "尝试启动BLE广播（备用方法）...");
+        Log.d(TAG, "备用广播设置: " + settings.toString());
+        Log.d(TAG, "备用广播数据: " + advertiseData.toString());
         isUsingFallback = true;
     }
 
@@ -223,7 +227,11 @@ public class BleServer {
         if (bluetoothLeAdvertiser != null && isAdvertising) {
             bluetoothLeAdvertiser.stopAdvertising(advertiseCallback);
             isAdvertising = false;
-            Log.i(TAG, "停止BLE广播");
+            Log.i(TAG, "BLE广播已停止.");
+        } else if (bluetoothLeAdvertiser == null) {
+            Log.w(TAG, "BluetoothLeAdvertiser已为null，无法停止广播.");
+        } else {
+            Log.i(TAG, "BLE广播未在运行，无需停止.");
         }
     }
 
@@ -233,6 +241,7 @@ public class BleServer {
     @SuppressLint("MissingPermission")
     public void stopServer() {
         if (!isServerRunning) {
+            Log.w(TAG, "BLE服务器未在运行，无需停止.");
             return;
         }
 
@@ -247,15 +256,17 @@ public class BleServer {
 
         // 清理连接的设备列表
         connectedDevices.clear();
+        subscribedDevices.clear();
 
         // 关闭GATT服务器
         if (gattServer != null) {
             gattServer.close();
             gattServer = null;
+            Log.i(TAG, "GATT服务器已关闭.");
         }
 
         isServerRunning = false;
-        Log.i(TAG, "BLE服务器已停止");
+        Log.i(TAG, "BLE服务器已完全停止.");
     }
 
     /**
@@ -272,6 +283,7 @@ public class BleServer {
                 }
             }
         }, HEARTBEAT_INTERVAL);
+        Log.i(TAG, "心跳发送已启动，间隔: " + HEARTBEAT_INTERVAL + "ms.");
     }
 
     /**
@@ -279,6 +291,7 @@ public class BleServer {
      */
     private void stopHeartbeat() {
         handler.removeCallbacksAndMessages(null);
+        Log.i(TAG, "心跳发送已停止.");
     }
 
     /**
@@ -286,42 +299,41 @@ public class BleServer {
      */
     private void sendHeartbeat() {
         if (gattServer == null || heartbeatCharacteristic == null) {
+            Log.w(TAG, "GATT服务器或心跳特征未初始化，无法发送心跳.");
             return;
         }
 
-        // 创建心跳数据
         heartbeatCounter++;
-
-        // 创建简单的心跳字符串
-        String heartbeatData = "heartbeat" + heartbeatCounter;
-
+        String heartbeatData = "Heartbeat: " + heartbeatCounter;
         byte[] data = heartbeatData.getBytes();
         heartbeatCharacteristic.setValue(data);
 
-        // 向所有已连接的客户端发送通知
-        boolean allSuccess = true;
-        if (connectedDevices.isEmpty()) {
-            Log.d(TAG, "没有连接的客户端，跳过心跳发送");
+        if (subscribedDevices.isEmpty()) {
+            Log.d(TAG, "没有客户端订阅心跳通知，跳过发送.");
             return;
         }
 
-        for (android.bluetooth.BluetoothDevice device : connectedDevices) {
+        boolean allSuccess = true;
+        for (android.bluetooth.BluetoothDevice device : subscribedDevices) {
+            // notifyCharacteristicChanged 方法用于向已订阅的客户端发送通知
             boolean success = gattServer.notifyCharacteristicChanged(
                     device,
                     heartbeatCharacteristic,
-                    false // 不需要确认
+                    false // 不需要确认 (Indication 为 true)
             );
 
             if (success) {
-                Log.d(TAG, "心跳发送成功到设备 " + device.getAddress() + ": " + heartbeatData);
+                Log.d(TAG, "心跳通知发送成功到设备 " + device.getAddress() + ": " + heartbeatData);
             } else {
-                Log.e(TAG, "心跳发送失败到设备 " + device.getAddress());
+                Log.e(TAG, "心跳通知发送失败到设备 " + device.getAddress());
                 allSuccess = false;
             }
         }
 
         if (allSuccess) {
-            Log.d(TAG, "心跳发送成功到所有设备: " + heartbeatData);
+            Log.d(TAG, "所有订阅设备的心跳通知发送完成.");
+        } else {
+            Log.e(TAG, "部分心跳通知发送失败.");
         }
     }
 
@@ -347,6 +359,13 @@ public class BleServer {
     }
 
     /**
+     * 获取订阅通知的设备数量
+     */
+    public int getSubscribedDeviceCount() {
+        return subscribedDevices.size();
+    }
+
+    /**
      * 检查是否正在广播
      */
     public boolean isAdvertising() {
@@ -361,42 +380,46 @@ public class BleServer {
         public void onStartSuccess(AdvertiseSettings settingsInEffect) {
             super.onStartSuccess(settingsInEffect);
             isAdvertising = true;
-            Log.i(TAG, "BLE广播启动成功");
+            isUsingFallback = false; // 如果成功，重置备用标志
+            Log.i(TAG, "BLE广播启动成功!");
         }
 
         @Override
         public void onStartFailure(int errorCode) {
             super.onStartFailure(errorCode);
             isAdvertising = false;
-            String errorMessage = "未知错误";
+            String errorMessage;
             switch (errorCode) {
                 case ADVERTISE_FAILED_ALREADY_STARTED:
-                    errorMessage = "广播已启动";
+                    errorMessage = "广播已启动.";
                     break;
                 case ADVERTISE_FAILED_DATA_TOO_LARGE:
-                    errorMessage = "数据太大";
+                    errorMessage = "广播数据太大.";
                     if (!isUsingFallback) {
-                        Log.w(TAG, "广播数据太大，尝试备用方法");
+                        Log.w(TAG, "广播数据太大，尝试使用备用广播方法...");
                         startAdvertisingFallback();
-                        return;
+                        return; // 尝试备用方法后直接返回，不报告失败
                     } else {
-                        Log.e(TAG, "备用方法也失败，数据仍然太大");
+                        errorMessage = "备用广播方法也失败，数据仍然太大.";
                     }
                     break;
                 case ADVERTISE_FAILED_TOO_MANY_ADVERTISERS:
-                    errorMessage = "广播器太多";
+                    errorMessage = "广播器过多，系统资源不足.";
                     break;
                 case ADVERTISE_FAILED_INTERNAL_ERROR:
-                    errorMessage = "内部错误";
+                    errorMessage = "内部错误.";
                     break;
                 case ADVERTISE_FAILED_FEATURE_UNSUPPORTED:
-                    errorMessage = "功能不支持";
+                    errorMessage = "设备不支持此广播功能.";
+                    break;
+                default:
+                    errorMessage = "未知错误.";
                     break;
             }
             Log.e(TAG, "BLE广播启动失败: " + errorMessage + " (错误码: " + errorCode + ")");
         }
     };
-    
+
     /**
      * GATT服务器回调
      */
@@ -404,88 +427,149 @@ public class BleServer {
         @Override
         public void onConnectionStateChange(android.bluetooth.BluetoothDevice device, int status, int newState) {
             super.onConnectionStateChange(device, status, newState);
-            
+
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
                     Log.i(TAG, "客户端已连接: " + device.getAddress());
-                    connectedDevices.add(device);
+                    if (!connectedDevices.contains(device)) {
+                        connectedDevices.add(device);
+                    }
+                    // 连接成功后，客户端需要立即开始服务发现
+                    Log.d(TAG, "连接的设备数量: " + connectedDevices.size());
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                    Log.i(TAG, "客户端已断开: " + device.getAddress());
+                    Log.i(TAG, "客户端已断开连接: " + device.getAddress());
                     connectedDevices.remove(device);
+                    subscribedDevices.remove(device); // 客户端断开连接，移除订阅
+                    Log.d(TAG, "连接的设备数量: " + connectedDevices.size() + ", 订阅的设备数量: " + subscribedDevices.size());
                 }
             } else {
-                Log.e(TAG, "连接状态改变失败: " + status);
+                Log.e(TAG, "连接状态改变失败，设备: " + device.getAddress() + ", 状态: " + status + ", 新状态: " + newState);
+                // 某些错误状态下，也需要从列表中移除设备
+                connectedDevices.remove(device);
+                subscribedDevices.remove(device);
             }
         }
-        
+
         @Override
         public void onServiceAdded(int status, BluetoothGattService service) {
             super.onServiceAdded(status, service);
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 Log.i(TAG, "服务添加成功: " + service.getUuid());
             } else {
-                Log.e(TAG, "服务添加失败: " + status);
+                Log.e(TAG, "服务添加失败: " + service.getUuid() + ", 状态: " + status);
             }
         }
-        
+
         @Override
         public void onCharacteristicReadRequest(android.bluetooth.BluetoothDevice device, int requestId, int offset, BluetoothGattCharacteristic characteristic) {
             super.onCharacteristicReadRequest(device, requestId, offset, characteristic);
-            
-            Log.d(TAG, "收到特征读取请求: " + characteristic.getUuid());
-            
+
+            Log.d(TAG, "收到来自设备 " + device.getAddress() + " 的特征读取请求: " + characteristic.getUuid());
+
             if (characteristic.getUuid().equals(HEARTBEAT_CHARACTERISTIC_UUID)) {
                 // 返回当前心跳数据
-                String heartbeatData = "heartbeat" + heartbeatCounter;
+                String heartbeatData = "Heartbeat: " + heartbeatCounter;
                 byte[] data = heartbeatData.getBytes();
-                
-                gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, data);
-                Log.d(TAG, "响应心跳读取请求: " + heartbeatData);
+
+                // 检查offset，避免发送部分数据
+                if (offset > data.length) {
+                    gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_INVALID_OFFSET, offset, null);
+                    Log.e(TAG, "读取请求 offset 超出数据长度.");
+                    return;
+                }
+
+                byte[] responseData = new byte[data.length - offset];
+                System.arraycopy(data, offset, responseData, 0, responseData.length);
+
+                gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, responseData);
+                Log.d(TAG, "响应心跳读取请求到设备 " + device.getAddress() + ": " + heartbeatData + " (offset: " + offset + ")");
             } else {
                 // 未知特征，返回错误
                 gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_FAILURE, offset, null);
+                Log.e(TAG, "收到未知特征读取请求: " + characteristic.getUuid());
             }
         }
-        
+
         @Override
         public void onDescriptorReadRequest(android.bluetooth.BluetoothDevice device, int requestId, int offset, BluetoothGattDescriptor descriptor) {
             super.onDescriptorReadRequest(device, requestId, offset, descriptor);
-            
-            Log.d(TAG, "收到描述符读取请求: " + descriptor.getUuid());
-            
+
+            Log.d(TAG, "收到来自设备 " + device.getAddress() + " 的描述符读取请求: " + descriptor.getUuid());
+
             if (descriptor.getUuid().equals(CLIENT_CHARACTERISTIC_CONFIG)) {
-                // 返回客户端特征配置
-                byte[] value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE;
+                // 返回客户端特征配置的当前值
+                byte[] value = subscribedDevices.contains(device) ?
+                        BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE :
+                        BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE;
+
                 gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, value);
+                Log.d(TAG, "响应客户端特征配置读取请求到设备 " + device.getAddress() + ", 值: " + (subscribedDevices.contains(device) ? "ENABLE" : "DISABLE"));
             } else {
                 gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_FAILURE, offset, null);
+                Log.e(TAG, "收到未知描述符读取请求: " + descriptor.getUuid());
             }
         }
-        
+
         @Override
         public void onDescriptorWriteRequest(android.bluetooth.BluetoothDevice device, int requestId, BluetoothGattDescriptor descriptor, boolean preparedWrite, boolean responseNeeded, int offset, byte[] value) {
             super.onDescriptorWriteRequest(device, requestId, descriptor, preparedWrite, responseNeeded, offset, value);
-            
-            Log.d(TAG, "收到描述符写入请求: " + descriptor.getUuid());
-            
+
+            Log.d(TAG, "收到来自设备 " + device.getAddress() + " 的描述符写入请求: " + descriptor.getUuid());
+
             if (descriptor.getUuid().equals(CLIENT_CHARACTERISTIC_CONFIG)) {
                 // 处理客户端特征配置写入
                 if (responseNeeded) {
                     gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, null);
                 }
-                Log.d(TAG, "客户端特征配置已更新");
+
+                // 检查是否启用通知
+                if (value != null && value.length > 0) {
+                    if (value[0] == BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE[0] ||
+                            value[0] == BluetoothGattDescriptor.ENABLE_INDICATION_VALUE[0]) {
+                        // 客户端订阅了通知或指示
+                        if (!subscribedDevices.contains(device)) {
+                            subscribedDevices.add(device);
+                            Log.i(TAG, "设备 " + device.getAddress() + " 订阅了心跳通知/指示.");
+                        }
+                    } else if (value[0] == BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE[0]) {
+                        // 客户端取消订阅
+                        subscribedDevices.remove(device);
+                        Log.i(TAG, "设备 " + device.getAddress() + " 取消订阅了心跳通知/指示.");
+                    } else {
+                        Log.w(TAG, "收到来自设备 " + device.getAddress() + " 的未知通知/指示值.");
+                    }
+                }
+
+                Log.d(TAG, "客户端特征配置已更新，当前订阅设备数: " + subscribedDevices.size());
             } else {
                 if (responseNeeded) {
                     gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_FAILURE, offset, null);
                 }
+                Log.e(TAG, "收到来自设备 " + device.getAddress() + " 的未知描述符写入请求: " + descriptor.getUuid());
             }
         }
-        
+
         @Override
         public void onExecuteWrite(android.bluetooth.BluetoothDevice device, int requestId, boolean execute) {
             super.onExecuteWrite(device, requestId, execute);
-            Log.d(TAG, "收到执行写入请求: " + execute);
+            Log.d(TAG, "收到来自设备 " + device.getAddress() + " 的执行写入请求: " + execute);
             gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null);
         }
+
+        @Override
+        public void onCharacteristicWriteRequest(android.bluetooth.BluetoothDevice device, int requestId, BluetoothGattCharacteristic characteristic, boolean preparedWrite, boolean responseNeeded, int offset, byte[] value) {
+            super.onCharacteristicWriteRequest(device, requestId, characteristic, preparedWrite, responseNeeded, offset, value);
+            // 如果你的心跳特征允许写入，需要在这里处理
+            Log.d(TAG, "收到来自设备 " + device.getAddress() + " 的特征写入请求: " + characteristic.getUuid());
+            if (responseNeeded) {
+                gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, null);
+            }
+        }
+
+        @Override
+        public void onMtuChanged(android.bluetooth.BluetoothDevice device, int mtu) {
+            super.onMtuChanged(device, mtu);
+            Log.i(TAG, "设备 " + device.getAddress() + " MTU 已改变为: " + mtu);
+        }
     };
-} 
+}

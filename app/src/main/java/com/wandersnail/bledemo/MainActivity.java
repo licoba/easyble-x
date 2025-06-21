@@ -67,6 +67,7 @@ public class MainActivity extends BaseActivity {
     private final List<Item> itemList = new ArrayList<>();
     private ListViewAdapter adapter;
     private Connection connection;
+    private BleServer bleServer;
 
     private void assignViews() {
         lv = findViewById(R.id.lv);
@@ -421,6 +422,7 @@ public class MainActivity extends BaseActivity {
         //不设置回调，使用观察者模式接收结果
         builder.build().execute(connection);
     }
+
 
     private class ListViewAdapter extends TreeListAdapter<Item> {
         ListViewAdapter(@NotNull ListView lv, @NotNull List<Item> nodes) {
