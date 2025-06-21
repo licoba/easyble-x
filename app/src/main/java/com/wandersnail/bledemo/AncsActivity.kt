@@ -73,16 +73,16 @@ class AncsActivity : AppCompatActivity() {
 
         @SuppressLint("MissingPermission")
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
-            logAndUpdateUI("服务发现: status=$status")
+            logAndUpdateUI("服务发现成功: status=$status")
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 val ancsService = ancsUtil.getAncsService(gatt)
                 if (ancsService != null) {
-                    logAndUpdateUI("发现ANCS服务")
+                    logAndUpdateUI("✅找到ANCS服务")
                     isServiceDiscovered = true
 
                     notificationSourceChar = ancsUtil.getNotificationSourceCharacteristic(gatt)
                     if (notificationSourceChar != null) {
-                        logAndUpdateUI("找到Notification Source特征")
+                        logAndUpdateUI("✅找到Notification Source特征")
                         binding.btnEnableNotifySource.isEnabled = true
                     } else {
                         logAndUpdateUI(Log.ERROR, "未找到Notification Source特征")
@@ -91,22 +91,19 @@ class AncsActivity : AppCompatActivity() {
 
                     dataSourceChar = ancsUtil.getDataSourceCharacteristic(gatt)
                     if (dataSourceChar != null) {
-                        logAndUpdateUI("找到Data Source特征")
+                        logAndUpdateUI("✅找到Data Source特征")
                         binding.btnEnableDataSource.isEnabled = true
+                        enableAllNotifications()
                     } else {
                         logAndUpdateUI(Log.ERROR, "未找到Data Source特征")
                         binding.btnEnableDataSource.isEnabled = false
                     }
                 } else {
                     logAndUpdateUI(Log.ERROR, "未找到ANCS服务")
-                    val deviceAddress = gatt.device.address
-                    logAndUpdateUI("设备 $deviceAddress 不支持ANCS服务，已记录")
                     gatt.close()
                 }
             } else {
                 logAndUpdateUI(Log.ERROR, "服务发现失败: $status")
-                val deviceAddress = gatt.device.address
-                logAndUpdateUI("设备 $deviceAddress 服务发现失败，已记录")
                 gatt.close()
             }
         }
@@ -166,6 +163,7 @@ class AncsActivity : AppCompatActivity() {
         override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 logAndUpdateUI("MTU协商成功: $mtu")
+
             } else {
                 logAndUpdateUI(Log.ERROR, "MTU协商失败: $status")
             }
@@ -283,14 +281,9 @@ class AncsActivity : AppCompatActivity() {
             finish()
             return
         }
-
-        // 使用 PermissionX 检查和请求权限
         checkAndRequestPermissions()
     }
 
-    /**
-     * 使用 PermissionX 检查和请求蓝牙权限
-     */
     private fun checkAndRequestPermissions() {
         val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             arrayOf(
@@ -423,16 +416,25 @@ class AncsActivity : AppCompatActivity() {
         }
     }
 
+    private fun enableAllNotifications() {
+        lifecycleScope.launch {
+            enableNotificationSource()
+            delay(1000)
+            enableDataSource()
+        }
+    }
+
     @SuppressLint("MissingPermission")
     private fun enableNotificationSource() {
         if (notificationSourceChar != null) {
+            notificationSourceEnabledTime = System.currentTimeMillis()
+            logAndUpdateUI("已记录通知源启用时间，将忽略后续3秒内的通知")
             val success =
                 bluetoothGatt!!.setCharacteristicNotification(notificationSourceChar, true)
             if (!success) {
                 logAndUpdateUI(Log.ERROR, "启用Notification Source通知失败")
                 return
             }
-
             val descriptor =
                 notificationSourceChar!!.getDescriptor(ANCSUtil.CLIENT_CHARACTERISTIC_CONFIG)
             if (descriptor != null) {
@@ -444,8 +446,7 @@ class AncsActivity : AppCompatActivity() {
                 }
                 logAndUpdateUI("Notification Source配置完成")
                 binding.btnEnableNotifySource.isEnabled = false
-                notificationSourceEnabledTime = System.currentTimeMillis()
-                logAndUpdateUI("已记录通知源启用时间，将忽略后续3秒内的通知")
+
             }
         }
     }
