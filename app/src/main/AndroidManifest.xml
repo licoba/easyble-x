@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    android:sharedUserId="android.uid.system">
 
     <!-- 基础蓝牙权限（所有Android版本） -->
     <uses-permission android:name="android.permission.BLUETOOTH" />
@@ -12,13 +13,16 @@
     <!-- 如果仅用于设备发现而非定位，可添加neverForLocation标记避免位置权限 -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"  />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    
+    <!-- 系统级蓝牙配对权限 -->
+    <uses-permission android:name="android.permission.BLUETOOTH_PRIVILEGED" />
+    <uses-permission android:name="android.permission.MODIFY_PHONE_STATE" />
+    
     <!-- 硬件支持声明 -->
     <uses-feature android:name="android.hardware.bluetooth" android:required="true" />
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
-    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
-
 
     <application
         android:allowBackup="true"

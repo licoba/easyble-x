@@ -22,17 +22,20 @@ import android.util.Log
 import android.view.MenuItem
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.RequiresPermission
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.lifecycle.lifecycleScope
 import com.blankj.utilcode.util.ToastUtils
 import com.kongzue.dialogx.dialogs.PopNotification
+import com.kongzue.dialogx.dialogs.PopTip
 import com.permissionx.guolindev.PermissionX
 import com.wandersnail.bledemo.databinding.ActivityAncsBinding
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
+@SuppressLint("MissingPermission")
 
 class AncsActivity : AppCompatActivity() {
     private lateinit var binding: ActivityAncsBinding
@@ -48,6 +51,15 @@ class AncsActivity : AppCompatActivity() {
     private var isServiceDiscovered = false
     private val ancsUtil = ANCSUtil()
     private var notificationSourceEnabledTime: Long = 0 // 通知源启用时间戳
+    
+    // 添加配对监听器
+    private var pairingListener: AdvancedBluetoothPairingListener? = null
+    
+    // 添加连接状态标志
+    private var isConnecting = false
+    private var isConnected = false
+    private var isMtuRequested = false
+    private var isNotificationsEnabled = false
 
     private val gattCallback: BluetoothGattCallback = object : BluetoothGattCallback() {
         @SuppressLint("MissingPermission")
@@ -55,17 +67,31 @@ class AncsActivity : AppCompatActivity() {
             logAndUpdateUI("连接状态变化: status=$status, newState=$newState")
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
-                    Log.i(TAG, "设备已连接，开始发现服务")
-                    logAndUpdateUI("已连接到设备，正在发现服务...")
-                    isServiceDiscovered = false
-                    gatt.requestMtu(512)
-                    logAndUpdateUI("已请求MTU: 512")
-                    gatt.discoverServices()
+                    if (!isConnected) {
+                        isConnected = true
+                        isConnecting = false
+                        Log.i(TAG, "设备已连接，开始发现服务")
+                        logAndUpdateUI("已连接到设备，正在发现服务...")
+                        isServiceDiscovered = false
+                        gatt.discoverServices()
+                    } else {
+                        Log.d(TAG, "设备已连接，跳过重复处理")
+                    }
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                    isConnected = false
+                    isConnecting = false
+                    isServiceDiscovered = false
+                    isMtuRequested = false
+                    isNotificationsEnabled = false
                     logAndUpdateUI("设备已断开连接")
                     gatt.close()
                 }
             } else {
+                isConnected = false
+                isConnecting = false
+                isServiceDiscovered = false
+                isMtuRequested = false
+                isNotificationsEnabled = false
                 logAndUpdateUI(Log.ERROR, "连接失败: $status")
                 gatt.close()
             }
@@ -74,34 +100,34 @@ class AncsActivity : AppCompatActivity() {
         @SuppressLint("MissingPermission")
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
             logAndUpdateUI("服务发现成功: status=$status")
-            if (status == BluetoothGatt.GATT_SUCCESS) {
+            if (status == BluetoothGatt.GATT_SUCCESS && !isServiceDiscovered) {
+                isServiceDiscovered = true
                 val ancsService = ancsUtil.getAncsService(gatt)
                 if (ancsService != null) {
                     logAndUpdateUI("✅找到ANCS服务")
-                    isServiceDiscovered = true
 
                     notificationSourceChar = ancsUtil.getNotificationSourceCharacteristic(gatt)
                     if (notificationSourceChar != null) {
                         logAndUpdateUI("✅找到Notification Source特征")
-                        binding.btnEnableNotifySource.isEnabled = true
                     } else {
                         logAndUpdateUI(Log.ERROR, "未找到Notification Source特征")
-                        binding.btnEnableNotifySource.isEnabled = false
                     }
 
                     dataSourceChar = ancsUtil.getDataSourceCharacteristic(gatt)
                     if (dataSourceChar != null) {
                         logAndUpdateUI("✅找到Data Source特征")
-                        binding.btnEnableDataSource.isEnabled = true
-                        enableAllNotifications()
                     } else {
                         logAndUpdateUI(Log.ERROR, "未找到Data Source特征")
-                        binding.btnEnableDataSource.isEnabled = false
                     }
+                    // 在服务发现完成后立即请求MTU
+                    gatt.requestMtu(512)
+                    logAndUpdateUI("已请求MTU: 512")
                 } else {
                     logAndUpdateUI(Log.ERROR, "未找到ANCS服务")
                     gatt.close()
                 }
+            } else if (isServiceDiscovered) {
+                Log.d(TAG, "服务已发现，跳过重复处理")
             } else {
                 logAndUpdateUI(Log.ERROR, "服务发现失败: $status")
                 gatt.close()
@@ -113,9 +139,8 @@ class AncsActivity : AppCompatActivity() {
             descriptor: BluetoothGattDescriptor,
             status: Int
         ) {
-            logAndUpdateUI("描述符写入: status=$status")
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                Log.i(TAG, "描述符写入成功")
+                Log.i(TAG, "描述符写入成功  $descriptor")
             } else {
                 Log.e(TAG, "描述符写入失败: $status")
             }
@@ -163,7 +188,9 @@ class AncsActivity : AppCompatActivity() {
         override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 logAndUpdateUI("MTU协商成功: $mtu")
-
+                if (!isNotificationsEnabled) {
+                    enableAllNotifications()
+                }
             } else {
                 logAndUpdateUI(Log.ERROR, "MTU协商失败: $status")
             }
@@ -281,7 +308,79 @@ class AncsActivity : AppCompatActivity() {
             finish()
             return
         }
+        
+        // 初始化配对监听器
+        initPairingListener()
+        
         checkAndRequestPermissions()
+    }
+
+    /**
+     * 初始化配对监听器
+     */
+    private fun initPairingListener() {
+        pairingListener = AdvancedBluetoothPairingListener(this)
+        
+        // 设置配对回调
+        pairingListener?.setPairingCallback(object : AdvancedBluetoothPairingListener.PairingCallback {
+            override fun onPairingRequest(device: BluetoothDevice, pairingVariant: Int) {
+                logAndUpdateUI("收到配对请求: ${device.address} (${device.name}), 配对方式: $pairingVariant")
+            }
+
+            override fun onPairingAccepted(device: BluetoothDevice) {
+                logAndUpdateUI("自动同意配对请求: ${device.address} (${device.name})")
+                Toast.makeText(this@AncsActivity, "自动同意配对: ${device.name}", Toast.LENGTH_SHORT).show()
+            }
+
+            override fun onPairingRejected(device: BluetoothDevice) {
+                logAndUpdateUI("拒绝配对请求: ${device.address} (${device.name})")
+            }
+
+            override fun onPairingCompleted(device: BluetoothDevice, success: Boolean) {
+                if (success) {
+                    logAndUpdateUI("配对完成: ${device.address} (${device.name})")
+                    Toast.makeText(this@AncsActivity, "配对成功: ${device.name}", Toast.LENGTH_SHORT).show()
+                } else {
+                    logAndUpdateUI("配对失败: ${device.address} (${device.name})")
+                    Toast.makeText(this@AncsActivity, "配对失败: ${device.name}", Toast.LENGTH_SHORT).show()
+                }
+            }
+
+            override fun onPairingFailed(device: BluetoothDevice, reason: String) {
+                logAndUpdateUI("配对失败: ${device.address} (${device.name}), 原因: $reason")
+                Toast.makeText(this@AncsActivity, "配对失败: $reason", Toast.LENGTH_SHORT).show()
+            }
+        })
+        
+        // 配置配对监听器
+        pairingListener?.apply {
+            setAutoAcceptPairing(true)        // 自动接受配对
+            setAutoAcceptAllDevices(true)     // 接受所有设备
+        }
+        
+        logAndUpdateUI("配对监听器初始化完成")
+    }
+
+
+    private fun startPairingListener() {
+        pairingListener?.let { listener ->
+            if (!listener.isListening) {
+                listener.startListening()
+                logAndUpdateUI("配对监听器已启动，将自动同意所有配对请求")
+            } else {
+                logAndUpdateUI("配对监听器已在运行中")
+            }
+        }
+    }
+    
+
+    private fun stopPairingListener() {
+        pairingListener?.let { listener ->
+            if (listener.isListening) {
+                listener.stopListening()
+                logAndUpdateUI("配对监听器已停止")
+            }
+        }
     }
 
     private fun checkAndRequestPermissions() {
@@ -316,6 +415,7 @@ class AncsActivity : AppCompatActivity() {
             .request { allGranted, _, deniedList ->
                 if (allGranted) {
                     logAndUpdateUI("所有权限已授予")
+                    startPairingListener()
                     checkBluetoothEnabled()
                 } else {
                     logAndUpdateUI("以下权限被拒绝: $deniedList")
@@ -383,6 +483,12 @@ class AncsActivity : AppCompatActivity() {
 
     @SuppressLint("MissingPermission")
     private fun connectToDevice(device: BluetoothDevice) {
+        if (isConnecting || isConnected) {
+            Log.d(TAG, "正在连接或已连接，跳过重复连接")
+            return
+        }
+        
+        isConnecting = true
         Log.i(TAG, "开始连接设备: ${device.address}")
         logAndUpdateUI("正在连接到设备...")
 
@@ -411,16 +517,21 @@ class AncsActivity : AppCompatActivity() {
                     return
                 }
                 logAndUpdateUI("Data Source配置完成")
-                binding.btnEnableDataSource.isEnabled = false
             }
         }
     }
 
     private fun enableAllNotifications() {
+        if (isNotificationsEnabled) {
+            Log.d(TAG, "通知已启用，跳过重复启用")
+            return
+        }
         lifecycleScope.launch {
             enableNotificationSource()
             delay(1000)
             enableDataSource()
+            isNotificationsEnabled = true
+            logAndUpdateUI("所有通知已启用")
         }
     }
 
@@ -445,8 +556,6 @@ class AncsActivity : AppCompatActivity() {
                     return
                 }
                 logAndUpdateUI("Notification Source配置完成")
-                binding.btnEnableNotifySource.isEnabled = false
-
             }
         }
     }
@@ -490,9 +599,8 @@ class AncsActivity : AppCompatActivity() {
                 allDetails.append(detail).append("\n")
             }
             logAndUpdateUI(allDetails.toString())
-            val msg =
-                "ANCS消息\n应用: ${details.appIdentifier}\n标题: ${details.title}\n内容: ${details.message}"
-            PopNotification.show(msg)
+            val msg = "ANCS消息\n应用: ${details.appIdentifier}\n标题: ${details.title}\n内容: ${details.message}"
+            PopTip.show(msg)
         }
     }
 
@@ -516,6 +624,7 @@ class AncsActivity : AppCompatActivity() {
             bleServer = null
         }
         stopServerStatusUpdater()
+        stopPairingListener()
     }
 
     @SuppressLint("DefaultLocale")

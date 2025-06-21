@@ -13,11 +13,24 @@ if (properties.containsKey('ndkVersion')) {
 }
 android {
     compileSdk rootProject.ext.compileSdkVersion
+    
+    signingConfigs {
+        release {
+            storeFile file("$rootDir/xr2-platform.jks")
+            storePassword 'android'
+            keyAlias 'platform'
+            keyPassword 'android'
+        }
+
+
+    }
+    
     defaultConfig {
         minSdk rootProject.ext.minSdkVersion
         targetSdk rootProject.ext.targetSdkVersion
-        applicationId "com.wandersnail.bledemo"
-        versionCode 1
+        applicationId "com.ffalconxr.mercury.launcher"
+        //noinspection HighAppVersionCode
+        versionCode 2099061004
         versionName "1.0"
         ndk {
             ndkVersion ndkVer
@@ -27,9 +40,11 @@ android {
     buildTypes {
         release {
             minifyEnabled false
+            signingConfig signingConfigs.release
         }
         debug {
             minifyEnabled false
+            signingConfig signingConfigs.release
         }
     }
     compileOptions {
