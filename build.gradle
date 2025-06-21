@@ -12,8 +12,8 @@ buildscript {
     repositories {
         google()
 //        mavenCentral()
-        maven { url 'https://maven.aliyun.com/repository/central' }
-        maven { url 'https://maven.aliyun.com/repository/jcenter' }
+        maven { url = uri("https://maven.aliyun.com/repository/central") }
+        maven { url = uri("https://maven.aliyun.com/repository/jcenter") }
     }
     dependencies {
         classpath 'com.android.tools.build:gradle:7.3.0'
@@ -25,9 +25,9 @@ allprojects {
     repositories {
         google()
 //        mavenCentral()
-        maven { url 'https://maven.aliyun.com/repository/central' }
-        maven { url 'https://maven.aliyun.com/repository/jcenter' }
-        maven { url 'https://jitpack.io' }
+        maven { url = uri("https://maven.aliyun.com/repository/central") }
+        maven { url = uri("https://maven.aliyun.com/repository/jcenter") }
+        maven { url = uri("https://jitpack.io") }
     }
 
     // 指定编码

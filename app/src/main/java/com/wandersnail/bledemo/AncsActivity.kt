@@ -25,6 +25,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.lifecycle.lifecycleScope
+import com.blankj.utilcode.util.ToastUtils
 import com.kongzue.dialogx.dialogs.PopNotification
 import com.permissionx.guolindev.PermissionX
 import com.wandersnail.bledemo.databinding.ActivityAncsBinding
@@ -46,32 +47,7 @@ class AncsActivity : AppCompatActivity() {
     private var scanTimeoutJob: Job? = null
     private var isServiceDiscovered = false
     private val ancsUtil = ANCSUtil()
-
-    private val enableBluetoothLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == RESULT_OK) {
-            connectedAncsDevice
-        } else {
-            Toast.makeText(this, "请开启蓝牙以使用ANCS功能", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun logAndUpdateUI(level: Int, message: String) {
-        when (level) {
-            Log.DEBUG -> Log.d(TAG, message)
-            Log.INFO -> Log.i(TAG, message)
-            Log.WARN -> Log.w(TAG, message)
-            Log.ERROR -> Log.e(TAG, message)
-        }
-        runOnUiThread {
-            binding.tvLog.appendLog(message)
-        }
-    }
-
-    private fun logAndUpdateUI(message: String) {
-        logAndUpdateUI(Log.INFO, message)
-    }
+    private var notificationSourceEnabledTime: Long = 0 // 通知源启用时间戳
 
     private val gattCallback: BluetoothGattCallback = object : BluetoothGattCallback() {
         @SuppressLint("MissingPermission")
@@ -153,14 +129,14 @@ class AncsActivity : AppCompatActivity() {
             characteristic: BluetoothGattCharacteristic,
             status: Int
         ) {
-            logAndUpdateUI("特征值写入: status=$status, UUID=${characteristic.uuid}")
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                logAndUpdateUI("特征值写入成功")
+                logAndUpdateUI("特征值写入成功 UUID=${characteristic.uuid}")
             } else {
-                logAndUpdateUI(Log.ERROR, "特征值写入失败: $status")
+                logAndUpdateUI(Log.ERROR, "特征值写入失败: $status UUID=${characteristic.uuid}")
             }
         }
 
+        @Deprecated("Deprecated in Java")
         override fun onCharacteristicChanged(
             gatt: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic
@@ -168,6 +144,13 @@ class AncsActivity : AppCompatActivity() {
             if (characteristic.uuid == ANCSUtil.NOTIFICATION_SOURCE_UUID) {
                 val data = characteristic.value
                 if (data != null && data.isNotEmpty()) {
+                    // 检查是否在忽略期内
+                    val currentTime = System.currentTimeMillis()
+                    val timeSinceEnabled = currentTime - notificationSourceEnabledTime
+                    if (timeSinceEnabled < IGNORE_DURATION_MS) {
+                        logAndUpdateUI("忽略监听成功后 $IGNORE_DURATION_MS ms内的通知")
+                        return
+                    }
                     logAndUpdateUI("收到ANCS通知数据，长度: ${data.size}")
                     parseAncsNotification(data)
                 }
@@ -196,11 +179,9 @@ class AncsActivity : AppCompatActivity() {
             val rssi = result.rssi
             val deviceName = device.name
             val deviceAddress = device.address
-
-            logAndUpdateUI("发现设备: $deviceName ($deviceAddress), RSSI: $rssi")
-
+            Log.d(TAG,"发现设备: $deviceName ($deviceAddress), RSSI: $rssi")
             if (deviceName != null && deviceName.lowercase(Locale.getDefault()).contains("ancs")) {
-                Log.i(TAG, "找到名称包含ANCS的设备: $deviceName ($deviceAddress)")
+                logAndUpdateUI("找到名称包含ANCS的设备: $deviceName ($deviceAddress)")
                 stopScan()
                 connectToDevice(device)
             }
@@ -339,7 +320,7 @@ class AncsActivity : AppCompatActivity() {
                     "取消"
                 )
             }
-            .request { allGranted, grantedList, deniedList ->
+            .request { allGranted, _, deniedList ->
                 if (allGranted) {
                     logAndUpdateUI("所有权限已授予")
                     checkBluetoothEnabled()
@@ -353,16 +334,12 @@ class AncsActivity : AppCompatActivity() {
     @get:SuppressLint("MissingPermission")
     private val connectedAncsDevice: BluetoothDevice?
         get() {
-            logAndUpdateUI("开始查找已连接的ANCS设备")
-
             for (device in bluetoothAdapter!!.bondedDevices) {
                 if (device.type == BluetoothDevice.DEVICE_TYPE_LE) {
                     Log.i(TAG, "找到LE设备: ${device.address}")
                     return device
                 }
             }
-
-            Log.w(TAG, "未找到已连接的ANCS设备")
             logAndUpdateUI("未找到已连接的ANCS设备，请点击扫描按钮开始扫描")
             return null
         }
@@ -371,7 +348,6 @@ class AncsActivity : AppCompatActivity() {
     private fun startScan() {
         if (!isScanning) {
             logAndUpdateUI("正在扫描BLE设备...")
-
             scanTimeoutJob = lifecycleScope.launch {
                 delay(SCAN_PERIOD)
                 stopScan()
@@ -468,6 +444,8 @@ class AncsActivity : AppCompatActivity() {
                 }
                 logAndUpdateUI("Notification Source配置完成")
                 binding.btnEnableNotifySource.isEnabled = false
+                notificationSourceEnabledTime = System.currentTimeMillis()
+                logAndUpdateUI("已记录通知源启用时间，将忽略后续3秒内的通知")
             }
         }
     }
@@ -475,12 +453,7 @@ class AncsActivity : AppCompatActivity() {
     private fun parseAncsNotification(data: ByteArray) {
         val notificationInfo = ancsUtil.parseAncsNotification(data)
         if (notificationInfo != null) {
-            logAndUpdateUI("解析通知数据: eventId=${notificationInfo.eventId}, flags=${notificationInfo.eventFlags}, categoryId=${notificationInfo.categoryId}, uid=${notificationInfo.notificationUid}")
-
-            val notification =
-                "通知ID: ${notificationInfo.notificationUid}\n类型: ${notificationInfo.eventType}\n分类: ${notificationInfo.category}\n"
-            logAndUpdateUI(notification)
-
+            logAndUpdateUI("收到通知: eventId=${notificationInfo.eventId}, flags=${notificationInfo.eventFlags}, categoryId=${notificationInfo.categoryId}, uid=${notificationInfo.notificationUid}")
             if (ancsUtil.isNewSocialNotification(
                     notificationInfo.eventId,
                     notificationInfo.categoryId
@@ -509,18 +482,12 @@ class AncsActivity : AppCompatActivity() {
     private fun parseNotificationDetails(data: ByteArray?) {
         val details = ancsUtil.parseNotificationDetails(data)
         if (details != null) {
-            logAndUpdateUI("Command ID: ${String.format("0x%02X", details.commandId)}")
-            logAndUpdateUI("Notification UID: ${details.notificationUid}")
-
             val allDetails = StringBuilder()
             allDetails.append("Notification (UID: ${details.notificationUid}):\n")
-
             details.attributes.forEach { (name, value) ->
                 val detail = "  - $name: $value"
-                logAndUpdateUI(detail)
                 allDetails.append(detail).append("\n")
             }
-
             logAndUpdateUI(allDetails.toString())
             val msg =
                 "ANCS消息\n应用: ${details.appIdentifier}\n标题: ${details.title}\n内容: ${details.message}"
@@ -597,8 +564,38 @@ class AncsActivity : AppCompatActivity() {
         }
     }
 
+
+    private val enableBluetoothLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            connectedAncsDevice
+        } else {
+            ToastUtils.showShort( "请开启蓝牙以使用ANCS功能")
+        }
+    }
+
+    private fun logAndUpdateUI(level: Int, message: String) {
+        when (level) {
+            Log.DEBUG -> Log.d(TAG, message)
+            Log.INFO -> Log.i(TAG, message)
+            Log.WARN -> Log.w(TAG, message)
+            Log.ERROR -> Log.e(TAG, message)
+        }
+        runOnUiThread {
+            binding.tvLog.appendLog(message)
+        }
+    }
+
+    private fun logAndUpdateUI(message: String) {
+        logAndUpdateUI(Log.INFO, message)
+    }
+
+
     companion object {
         private const val TAG = "AncsActivity"
         private const val SCAN_PERIOD: Long = 10000
+        private const val IGNORE_DURATION_MS = 3000L // 忽略持续时间3秒
+
     }
 }
